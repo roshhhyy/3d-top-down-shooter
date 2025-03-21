@@ -22,7 +22,25 @@ const gameState = {
 
 // Add after gameState declaration
 const gameStats = {
-    kills: 0
+    kills: 0,
+    score: 0
+};
+
+// Add after gameState declaration
+const playerTrails = {
+    particles: [],
+    lastSpawnTime: 0,
+    spawnInterval: 50, // Spawn a particle every 50ms
+    particleLifetime: 1000, // Particles last for 1 second
+    particleCount: 8 // Number of particles per spawn
+};
+
+// Add after gameState declaration
+const staminaWarning = {
+    text: null,
+    opacity: 0,
+    fadeSpeed: 0.1,
+    isVisible: false
 };
 
 // Lighting
@@ -108,18 +126,33 @@ const keys = {
     w: false,
     s: false,
     a: false,
-    d: false
+    d: false,
+    ArrowUp: false,
+    ArrowDown: false,
+    ArrowLeft: false,
+    ArrowRight: false
 };
 
+// Add shooting mode state
+const shootingMode = {
+    useMouse: true // true for mouse, false for arrow keys
+};
+
+// Add key event listeners for arrow keys
 window.addEventListener('keydown', (e) => {
-    if (keys.hasOwnProperty(e.key.toLowerCase())) {
-        keys[e.key.toLowerCase()] = true;
+    if (keys.hasOwnProperty(e.key)) {
+        keys[e.key] = true;
+    }
+    // Toggle shooting mode with Tab key
+    if (e.key === 'Tab') {
+        e.preventDefault(); // Prevent tab from changing focus
+        shootingMode.useMouse = !shootingMode.useMouse;
     }
 });
 
 window.addEventListener('keyup', (e) => {
-    if (keys.hasOwnProperty(e.key.toLowerCase())) {
-        keys[e.key.toLowerCase()] = false;
+    if (keys.hasOwnProperty(e.key)) {
+        keys[e.key] = false;
     }
 });
 
@@ -151,47 +184,61 @@ function createBullet(position, direction) {
     bullets.push(bullet);
 }
 
-function shoot(mousePosition) {
+function shoot(input) {
     const currentTime = Date.now();
+    let direction;
+
+    if (shootingMode.useMouse) {
+        // Mouse shooting logic
+        const vector = new THREE.Vector3(
+            (input.x / window.innerWidth) * 2 - 1,
+            -(input.y / window.innerHeight) * 2 + 1,
+            0.5
+        );
+        vector.unproject(camera);
+        const dir = vector.sub(camera.position).normalize();
+        const horizontalDir = new THREE.Vector3(dir.x, 0, dir.z).normalize();
+        const targetPos = new THREE.Vector3()
+            .copy(player.position)
+            .add(horizontalDir.multiplyScalar(20));
+        direction = new THREE.Vector3()
+            .subVectors(targetPos, player.position)
+            .normalize();
+    } else {
+        // Arrow key shooting logic
+        const arrowDirection = new THREE.Vector3(0, 0, 0);
+        
+        // Calculate direction based on arrow key combinations
+        if (keys.ArrowUp) arrowDirection.z -= 1;
+        if (keys.ArrowDown) arrowDirection.z += 1;
+        if (keys.ArrowLeft) arrowDirection.x -= 1;
+        if (keys.ArrowRight) arrowDirection.x += 1;
+        
+        // Normalize direction if any arrow keys are pressed
+        if (arrowDirection.length() > 0) {
+            direction = arrowDirection.normalize();
+        } else {
+            // If no arrow keys pressed, don't shoot
+            return;
+        }
+    }
+
+    // Check cooldown and stamina after we have a valid direction
     if (currentTime - gameState.lastShotTime >= gameState.shootingCooldown && 
         gameState.playerStamina >= gameState.staminaPerShot) {
         
-        // Deduct stamina
-        gameState.playerStamina = Math.max(0, gameState.playerStamina - gameState.staminaPerShot);
-
-        // Convert screen coordinates to world coordinates
-        const vector = new THREE.Vector3(
-            (mousePosition.x / window.innerWidth) * 2 - 1,
-            -(mousePosition.y / window.innerHeight) * 2 + 1,
-            0.5
-        );
-
-        // Project mouse position to 3D space
-        vector.unproject(camera);
-        const dir = vector.sub(camera.position).normalize();
-        
-        // Calculate direction vector in the horizontal plane (ignore vertical component)
-        const horizontalDir = new THREE.Vector3(dir.x, 0, dir.z).normalize();
-        
-        // Calculate target position at fixed distance
-        const targetPos = new THREE.Vector3()
-            .copy(player.position)
-            .add(horizontalDir.multiplyScalar(20)); // Fixed distance of 20 units
-
-        // Calculate direction from player to target
-        const direction = new THREE.Vector3()
-            .subVectors(targetPos, player.position)
-            .normalize();
-
-        // Create bullet
+        // Create bullet with the calculated direction
         const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
         bullet.position.copy(player.position);
         bullet.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
         bullet.userData.velocity = direction.multiplyScalar(0.5);
-        bullet.userData.maxDistance = 20; // Set fixed distance
+        bullet.userData.maxDistance = 20;
         bullet.userData.initialPosition = bullet.position.clone();
         scene.add(bullet);
         bullets.push(bullet);
+        
+        // Deduct stamina and update cooldown only after successfully creating a bullet
+        gameState.playerStamina = Math.max(0, gameState.playerStamina - gameState.staminaPerShot);
         gameState.lastShotTime = currentTime;
     }
 }
@@ -322,12 +369,16 @@ function showGameOverScreen() {
     gameOverDiv.style.fontFamily = 'Arial, sans-serif';
     gameOverDiv.innerHTML = `
         <h1>Game Over</h1>
+        <div style="font-size: 24px; margin: 20px 0;">
+            <div>Final Score: ${Math.round(gameStats.score)}</div>
+            <div>Total Kills: ${gameStats.kills}</div>
+        </div>
         <button id="restartButton" style="font-size: 24px; padding: 10px 20px; margin: 10px;">Restart Game</button>
     `;
     document.body.appendChild(gameOverDiv);
 
     document.getElementById('restartButton').addEventListener('click', () => {
-        location.reload(); // For now, just reload the page
+        location.reload();
     });
 }
 
@@ -527,11 +578,11 @@ function spawnRandomHazard() {
 const bossState = {
     boss: null,
     isSpawned: false,
-    spawnTime: 0, // Set to 0 for immediate spawn during testing
     projectiles: [],
     lastShotTime: 0,
-    shootingCooldown: 1000,
-    hasGameStarted: true // Set to true for immediate spawn
+    shootingCooldown: 2000,
+    lastBossDefeatTime: 0,
+    respawnDelay: 30000 // 30 seconds in milliseconds
 };
 
 function createBossProjectile(position, direction) {
@@ -727,12 +778,36 @@ function createHUD() {
     hudContainer.style.textShadow = '2px 2px 4px rgba(0, 0, 0, 0.5)';
     hudContainer.id = 'hudContainer';
     
+    const scoreCounter = document.createElement('div');
+    scoreCounter.id = 'scoreCounter';
+    scoreCounter.textContent = 'Score: 0';
+    hudContainer.appendChild(scoreCounter);
+    
     const killsCounter = document.createElement('div');
     killsCounter.id = 'killsCounter';
     killsCounter.textContent = 'Kills: 0';
     hudContainer.appendChild(killsCounter);
     
     document.body.appendChild(hudContainer);
+}
+
+// Add updateHUD function
+function updateHUD() {
+    let scoreCounter = document.getElementById('scoreCounter');
+    let killsCounter = document.getElementById('killsCounter');
+    
+    if (!scoreCounter || !killsCounter) {
+        createHUD();
+        scoreCounter = document.getElementById('scoreCounter');
+        killsCounter = document.getElementById('killsCounter');
+    }
+    
+    if (scoreCounter) {
+        scoreCounter.textContent = `Score: ${Math.round(gameStats.score)}`;
+    }
+    if (killsCounter) {
+        killsCounter.textContent = `Kills: ${gameStats.kills}`;
+    }
 }
 
 createHUD();
@@ -836,6 +911,36 @@ function animate() {
         player.position.copy(newPosition);
     }
 
+    // Update player trails
+    const currentTime = Date.now();
+    if (currentTime - playerTrails.lastSpawnTime >= playerTrails.spawnInterval) {
+        // Spawn new particles
+        for (let i = 0; i < playerTrails.particleCount; i++) {
+            const offset = new THREE.Vector3(
+                (Math.random() - 0.5) * 0.5,
+                0,
+                (Math.random() - 0.5) * 0.5
+            );
+            createTrailParticle(player.position.clone().add(offset));
+        }
+        playerTrails.lastSpawnTime = currentTime;
+    }
+
+    // Update existing trail particles
+    for (let i = playerTrails.particles.length - 1; i >= 0; i--) {
+        const particle = playerTrails.particles[i];
+        particle.userData.age += 16; // Assuming 60fps
+
+        if (particle.userData.age >= particle.userData.lifetime) {
+            scene.remove(particle);
+            playerTrails.particles.splice(i, 1);
+        } else {
+            const lifePercent = 1 - (particle.userData.age / particle.userData.lifetime);
+            particle.material.opacity = lifePercent * 0.6;
+            particle.scale.setScalar(lifePercent * particle.userData.initialScale);
+        }
+    }
+
     // Update camera to follow player
     updateCamera();
 
@@ -858,17 +963,27 @@ function animate() {
     }
 
     // Automatic shooting
-    if (gameState.isShooting) {
-        shoot(gameState.mousePosition);
+    if (shootingMode.useMouse) {
+        if (gameState.isShooting) {
+            shoot(gameState.mousePosition);
+        }
+    } else {
+        // For arrow key shooting, check if any arrow keys are pressed
+        if (keys.ArrowUp || keys.ArrowDown || keys.ArrowLeft || keys.ArrowRight) {
+            shoot();
+        }
     }
 
     // Update stamina
-    if (!gameState.isShooting) {
-        gameState.playerStamina = Math.min(100, gameState.playerStamina + gameState.staminaRechargeRate * 0.016); // 0.016 is roughly 60 FPS
+    if (!gameState.isShooting && !(keys.ArrowUp || keys.ArrowDown || keys.ArrowLeft || keys.ArrowRight)) {
+        gameState.playerStamina = Math.min(100, gameState.playerStamina + gameState.staminaRechargeRate * 0.016);
     }
     
     // Update stamina bar
     player.userData.staminaBar.scale.x = (gameState.playerStamina / 100) * player.userData.staminaBar.userData.initialScale;
+
+    // Update stamina warning
+    updateStaminaWarning();
 
     // Update health bars to always face camera
     player.userData.healthBar.quaternion.copy(camera.quaternion);
@@ -902,21 +1017,31 @@ function animate() {
         for (let j = enemies.length - 1; j >= 0; j--) {
             const enemy = enemies[j];
             if (bullet.position.distanceTo(enemy.position) < 1) {
-                enemy.userData.health -= 34;
-                scene.remove(bullet);
-                bullets.splice(i, 1);
-
+                // Create impact effect
+                const impact = createProjectileImpact(bullet.position.clone());
+                explosions.push(impact);
+                
+                // Deal damage to enemy
+                enemy.userData.health -= 20; // Reduced from one-shot to 20 damage per hit
+                
                 // Update enemy health bar
                 const healthPercent = enemy.userData.health / enemy.userData.maxHealth;
                 enemy.userData.healthBar.scale.x = Math.max(0, healthPercent) * enemy.userData.healthBar.userData.initialScale;
-
+                
+                // Remove bullet
+                scene.remove(bullet);
+                bullets.splice(i, 1);
+                
+                // Only remove enemy if health is depleted
                 if (enemy.userData.health <= 0) {
                     explosions.push(createExplosion(enemy.position.clone()));
                     scene.remove(enemy);
-                    enemies.splice(j, 1);
-                    // Increment kills counter
+                    enemies.splice(enemies.indexOf(enemy), 1);
+                    
+                    // Update stats
                     gameStats.kills++;
-                    document.getElementById('killsCounter').textContent = `Kills: ${gameStats.kills}`;
+                    gameStats.score += enemy.userData.maxHealth; // Add enemy's max health to score
+                    updateHUD();
                 }
                 break;
             }
@@ -924,6 +1049,11 @@ function animate() {
 
         // Check for boss collision
         if (bossState.boss && bullet.position.distanceTo(bossState.boss.position) < 3) {
+            // Create impact effect
+            const impact = createProjectileImpact(bullet.position.clone());
+            explosions.push(impact);
+            
+            // Deal damage to boss
             bossState.boss.userData.health -= 10;
             scene.remove(bullet);
             bullets.splice(i, 1);
@@ -933,14 +1063,17 @@ function animate() {
             bossState.boss.userData.healthBar.scale.x = Math.max(0, healthPercent) * bossState.boss.userData.healthBar.userData.initialScale;
 
             if (bossState.boss.userData.health <= 0) {
-                // Create large explosion
-                for (let i = 0; i < 3; i++) {
-                    explosions.push(createExplosion(bossState.boss.position.clone()));
-                }
+                // Create explosion effect
+                explosions.push(createExplosion(bossState.boss.position.clone()));
+                
+                // Update stats
+                gameStats.score += bossState.boss.userData.maxHealth; // Add boss's max health to score
+                
+                // Remove current boss
                 scene.remove(bossState.boss);
                 bossState.boss = null;
-                gameState.isGameOver = true;
-                showGameOverScreen();
+                bossState.isSpawned = false;
+                bossState.lastBossDefeatTime = Date.now();
             }
             break;
         }
@@ -1268,9 +1401,12 @@ function animate() {
 
     // Boss spawn check (simplified for testing)
     if (!bossState.isSpawned) {
-        bossState.boss = createBossEnemy();
-        scene.add(bossState.boss);
-        bossState.isSpawned = true;
+        const currentTime = Date.now();
+        if (!bossState.lastBossDefeatTime || currentTime - bossState.lastBossDefeatTime >= bossState.respawnDelay) {
+            bossState.boss = createBossEnemy();
+            scene.add(bossState.boss);
+            bossState.isSpawned = true;
+        }
     }
 
     // Boss update logic
@@ -1331,6 +1467,11 @@ function animate() {
                 enemies.splice(j, 1);
                 scene.remove(projectile);
                 bossState.projectiles.splice(i, 1);
+                
+                // Update stats
+                gameStats.kills++;
+                gameStats.score += enemy.userData.maxHealth; // Add enemy's max health to score
+                updateHUD();
                 break;
             }
         }
@@ -1412,4 +1553,51 @@ window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-animate(); 
+animate();
+
+function createTrailParticle(position) {
+    const particle = new THREE.Mesh(
+        new THREE.CircleGeometry(0.3, 8),
+        new THREE.MeshBasicMaterial({
+            color: 0x3366cc,
+            transparent: true,
+            opacity: 0.6,
+            side: THREE.DoubleSide
+        })
+    );
+    
+    particle.position.copy(position);
+    particle.rotation.x = -Math.PI / 2; // Lay flat on the ground
+    particle.userData = {
+        age: 0,
+        lifetime: playerTrails.particleLifetime,
+        initialScale: particle.scale.x
+    };
+    
+    scene.add(particle);
+    playerTrails.particles.push(particle);
+    return particle;
+}
+
+// Add function to manage stamina warning
+function updateStaminaWarning() {
+    let warningElement = document.getElementById('staminaWarning');
+    
+    if (gameState.playerStamina <= 20) {
+        // Create warning if it doesn't exist
+        if (!warningElement) {
+            warningElement = document.createElement('div');
+            warningElement.id = 'staminaWarning';
+            warningElement.textContent = 'Low stamina!';
+            warningElement.style.color = '#E8B71C';
+            warningElement.style.fontWeight = 'bold';
+            warningElement.style.animation = 'pulse 1s infinite';
+            document.getElementById('hudContainer').appendChild(warningElement);
+        }
+    } else {
+        // Remove warning if it exists
+        if (warningElement) {
+            warningElement.remove();
+        }
+    }
+} 
