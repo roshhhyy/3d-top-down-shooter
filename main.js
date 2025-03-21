@@ -50,29 +50,440 @@ const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
 directionalLight.position.set(10, 20, 0);
 scene.add(directionalLight);
 
-// Ground plane (make it much larger)
-const groundGeometry = new THREE.PlaneGeometry(500, 500);
-const groundMaterial = new THREE.MeshPhongMaterial({ color: 0x404040 });
-const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+// Space background shader
+const spaceBackgroundVertexShader = `
+    varying vec2 vUv;
+    void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+`;
+
+const spaceBackgroundFragmentShader = `
+    uniform float time;
+    uniform vec2 resolution;
+    uniform vec2 cameraOffset;
+    varying vec2 vUv;
+
+    // Hash function for randomization
+    float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+    }
+
+    // Smooth noise function
+    float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float a = hash(i);
+        float b = hash(i + vec2(1.0, 0.0));
+        float c = hash(i + vec2(0.0, 1.0));
+        float d = hash(i + vec2(1.0, 1.0));
+        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    }
+
+    void main() {
+        // Convert UV to screen space coordinates
+        vec2 screenUV = gl_FragCoord.xy / resolution.xy;
+        
+        // Use screen space coordinates instead of world space
+        vec2 uv = screenUV * 2.0 - 1.0;
+        vec3 finalColor = vec3(0.0);
+        
+        // Deep space background - darker and more blue-tinted
+        finalColor = vec3(0.01, 0.01, 0.03);
+        
+        // Add subtle nebula effect with fixed position
+        float nebula1 = noise(uv * 1.5);
+        float nebula2 = noise(uv * 2.0);
+        
+        // More muted nebula colors
+        vec3 nebulaColor1 = vec3(0.2, 0.1, 0.3) * nebula1 * 0.15;
+        vec3 nebulaColor2 = vec3(0.1, 0.2, 0.3) * nebula2 * 0.15;
+        finalColor += nebulaColor1 + nebulaColor2;
+        
+        // Add fewer, larger stars with fixed positions
+        float stars = 0.0;
+        for(float i = 0.0; i < 2.0; i++) {
+            vec2 gridUV = fract(screenUV * (50.0 + i * 25.0));
+            float star = step(0.995, hash(gridUV));
+            stars += star * (sin(time * 1.0 + i) * 0.3 + 0.7);
+        }
+        finalColor += vec3(stars) * 0.5;
+        
+        gl_FragColor = vec4(finalColor, 1.0);
+    }
+`;
+
+// Ground plane (space background)
+const groundGeometry = new THREE.PlaneGeometry(1000, 1000);
+const spaceBackgroundMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+        time: { value: 0 },
+        resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+        cameraOffset: { value: new THREE.Vector2(0, 0) }
+    },
+    vertexShader: spaceBackgroundVertexShader,
+    fragmentShader: spaceBackgroundFragmentShader
+});
+
+const ground = new THREE.Mesh(groundGeometry, spaceBackgroundMaterial);
 ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.1;
 scene.add(ground);
+
+// Add window resize handler update for background resolution
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    
+    // Update resolution uniform
+    ground.material.uniforms.resolution.value.set(window.innerWidth, window.innerHeight);
+});
+
+// Create starfield
+function createStarfield() {
+    const starGeometry = new THREE.BufferGeometry();
+    const starMaterial = new THREE.PointsMaterial({
+        size: 0.1,
+        vertexColors: true
+    });
+
+    const starVertices = [];
+    const starColors = [];
+
+    for (let i = 0; i < 2000; i++) {
+        const x = (Math.random() - 0.5) * 2000;
+        const y = (Math.random() - 0.5) * 2000;
+        const z = (Math.random() - 0.5) * 2000;
+        starVertices.push(x, y, z);
+
+        const color = new THREE.Color();
+        color.setHSL(Math.random(), 0.5, 0.5 + Math.random() * 0.5);
+        starColors.push(color.r, color.g, color.b);
+    }
+
+    starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
+    starGeometry.setAttribute('color', new THREE.Float32BufferAttribute(starColors, 3));
+
+    const stars = new THREE.Points(starGeometry, starMaterial);
+    scene.add(stars);
+}
+
+// Create a planet instead of a tree
+function createPlanet(x, z) {
+    const planetGroup = new THREE.Group();
+    
+    const planetTypes = [
+        { 
+            radius: 1.5, 
+            color: 0x4444ff, 
+            emissive: 0x222244,
+            hasRings: false,
+            moonCount: 2,
+            type: 'gas'
+        }, // Blue gas giant
+        { 
+            radius: 0.8, 
+            color: 0xff4444, 
+            emissive: 0x442222,
+            hasRings: true,
+            moonCount: 1,
+            type: 'rocky'
+        }, // Red planet
+        { 
+            radius: 1.2, 
+            color: 0x44ff44, 
+            emissive: 0x224422,
+            hasRings: true,
+            moonCount: 3,
+            type: 'ice'
+        }, // Green ice planet
+        { 
+            radius: 0.6, 
+            color: 0xffff44, 
+            emissive: 0x444422,
+            hasRings: false,
+            moonCount: 0,
+            type: 'desert'
+        }  // Yellow desert planet
+    ];
+
+    const type = planetTypes[Math.floor(Math.random() * planetTypes.length)];
+    
+    // Create main planet sphere with surface detail
+    const geometry = new THREE.SphereGeometry(type.radius, 32, 32);
+    const material = new THREE.MeshStandardMaterial({
+        color: type.color,
+        emissive: type.emissive,
+        roughness: type.type === 'ice' ? 0.3 : 0.7,
+        metalness: type.type === 'rocky' ? 0.5 : 0.3
+    });
+
+    // Add surface detail based on planet type
+    if (type.type === 'rocky' || type.type === 'desert') {
+        const bumpGeometry = new THREE.SphereGeometry(type.radius * 1.02, 16, 16);
+        const bumpMaterial = new THREE.MeshStandardMaterial({
+            color: type.color,
+            emissive: type.emissive,
+            transparent: true,
+            opacity: 0.5,
+            roughness: 1.0
+        });
+        const bumpLayer = new THREE.Mesh(bumpGeometry, bumpMaterial);
+        planetGroup.add(bumpLayer);
+    }
+
+    const planet = new THREE.Mesh(geometry, material);
+    planetGroup.add(planet);
+
+    // Add rings if specified
+    if (type.hasRings) {
+        const ringGeometry = new THREE.RingGeometry(
+            type.radius * 1.5,  // Inner radius
+            type.radius * 2.5,  // Outer radius
+            64,                 // Segments
+            8,                  // Rings
+            0,                  // Start angle
+            Math.PI * 2        // End angle
+        );
+        const ringMaterial = new THREE.MeshStandardMaterial({
+            color: type.color,
+            emissive: type.emissive,
+            transparent: true,
+            opacity: 0.7,
+            side: THREE.DoubleSide,
+            depthWrite: false,  // Prevent depth writing issues
+            blending: THREE.AdditiveBlending  // Add glow effect
+        });
+        
+        // Create multiple ring layers for better visibility
+        for (let i = 0; i < 3; i++) {
+            const ring = new THREE.Mesh(ringGeometry, ringMaterial.clone());
+            ring.rotation.x = Math.PI / 3;  // Tilt rings
+            ring.position.y = i * 0.05;     // Slight vertical offset between layers
+            ring.scale.setScalar(1 + i * 0.1);  // Each layer slightly larger
+            planetGroup.add(ring);
+        }
+    }
+
+    // Add moons
+    const moons = [];
+    for (let i = 0; i < type.moonCount; i++) {
+        const moonRadius = type.radius * 0.2;
+        const moonGeometry = new THREE.SphereGeometry(moonRadius, 16, 16);
+        const moonMaterial = new THREE.MeshStandardMaterial({
+            color: 0xcccccc,
+            emissive: 0x222222,
+            roughness: 0.8,
+            metalness: 0.2
+        });
+        const moon = new THREE.Mesh(moonGeometry, moonMaterial);
+        
+        // Set up moon's orbit
+        const orbitRadius = type.radius * (2 + i * 0.5);
+        const orbitSpeed = 0.001 * (1 / (i + 1));
+        const orbitOffset = Math.random() * Math.PI * 2;
+        
+        moon.userData = {
+            orbitRadius,
+            orbitSpeed,
+            orbitOffset,
+            time: Math.random() * Math.PI * 2
+        };
+        
+        moons.push(moon);
+        planetGroup.add(moon);
+    }
+
+    planetGroup.position.set(x, type.radius, z);
+    
+    // Store properties for collision detection and effects
+    planetGroup.userData = {
+        type: type.type,
+        color: type.color,
+        emissive: type.emissive,
+        collisionRadius: type.radius,
+        moons: moons,
+        hasRings: type.hasRings
+    };
+
+    return planetGroup;
+}
+
+// Replace trees with planets
+const planets = [];
+for (let i = 0; i < 40; i++) {
+    const x = (Math.random() - 0.5) * 400;
+    const z = (Math.random() - 0.5) * 400;
+    if (Math.abs(x) > 20 || Math.abs(z) > 20) {
+        const planet = createPlanet(x, z);
+        planets.push(planet);
+        scene.add(planet);
+    }
+}
+
+// Update lighting for space theme
+ambientLight.color.setHex(0x333366);
+ambientLight.intensity = 0.4;
+
+directionalLight.intensity = 1.0;
+directionalLight.position.set(10, 20, 0);
+
+// Add a subtle point light for additional atmosphere
+const atmosphereLight = new THREE.PointLight(0x4444ff, 0.5, 100);
+atmosphereLight.position.set(0, 20, 0);
+scene.add(atmosphereLight);
 
 // Player ship
 function createPlayerShip() {
     const shipGroup = new THREE.Group();
     
-    // Main body (circular base)
-    const bodyGeometry = new THREE.CylinderGeometry(0.5, 0.5, 0.2, 32);
-    const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x3366cc });
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    shipGroup.add(body);
+    // Main hull (sleek and angular)
+    const hullGeometry = new THREE.BoxGeometry(0.8, 0.15, 2.2);
+    const hullMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0xeeeeee, // White base
+        shininess: 100,
+        specular: 0x666666
+    });
+    const hull = new THREE.Mesh(hullGeometry, hullMaterial);
+    hull.position.set(0, 0, 0);
+    shipGroup.add(hull);
 
-    // Cockpit (dome)
-    const cockpitGeometry = new THREE.SphereGeometry(0.3, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-    const cockpitMaterial = new THREE.MeshPhongMaterial({ color: 0x66ccff, transparent: true, opacity: 0.7 });
+    // Front section (sharp nose)
+    const noseGeometry = new THREE.CylinderGeometry(0, 0.3, 0.8, 4); // Made more angular with 4 segments
+    const noseMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0x222222, // Dark accent
+        shininess: 90,
+        specular: 0x444444
+    });
+    const nose = new THREE.Mesh(noseGeometry, noseMaterial);
+    nose.rotation.x = Math.PI / 2;
+    nose.position.z = -1.0;
+    shipGroup.add(nose);
+
+    // Side wings (angled and sharp)
+    const wingGeometry = new THREE.BoxGeometry(2.0, 0.05, 1.0);
+    const wingMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0xdddddd, // Slightly darker white
+        shininess: 90,
+        specular: 0x666666
+    });
+
+    // Left wing
+    const leftWing = new THREE.Mesh(wingGeometry, wingMaterial);
+    leftWing.position.set(-0.8, 0, 0);
+    leftWing.rotation.z = Math.PI / 12;
+    leftWing.rotation.y = -Math.PI / 16;
+    shipGroup.add(leftWing);
+
+    // Right wing
+    const rightWing = new THREE.Mesh(wingGeometry, wingMaterial);
+    rightWing.position.set(0.8, 0, 0);
+    rightWing.rotation.z = -Math.PI / 12;
+    rightWing.rotation.y = Math.PI / 16;
+    shipGroup.add(rightWing);
+
+    // Wing tips (black accents)
+    const tipGeometry = new THREE.BoxGeometry(0.4, 0.1, 0.3);
+    const tipMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0x111111,
+        shininess: 80,
+        specular: 0x333333
+    });
+
+    // Left tip
+    const leftTip = new THREE.Mesh(tipGeometry, tipMaterial);
+    leftTip.position.set(-1.8, 0, -0.2);
+    leftTip.rotation.z = Math.PI / 12;
+    shipGroup.add(leftTip);
+
+    // Right tip
+    const rightTip = new THREE.Mesh(tipGeometry, tipMaterial);
+    rightTip.position.set(1.8, 0, -0.2);
+    rightTip.rotation.z = -Math.PI / 12;
+    shipGroup.add(rightTip);
+
+    // Cockpit (sleek and angular)
+    const cockpitGeometry = new THREE.BoxGeometry(0.4, 0.1, 0.6);
+    const cockpitMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0x000000,
+        transparent: true, 
+        opacity: 0.7,
+        shininess: 100,
+        specular: 0x666666
+    });
     const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
-    cockpit.position.y = 0.1;
+    cockpit.position.set(0, 0.1, -0.4);
     shipGroup.add(cockpit);
+
+    // Engine section (four compact engines)
+    const engineGeometry = new THREE.CylinderGeometry(0.12, 0.1, 0.3, 6);
+    const engineMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0x333333,
+        shininess: 90,
+        specular: 0x666666
+    });
+
+    // Engine positions
+    const enginePositions = [
+        { x: -0.3, y: 0, z: 0.9 },
+        { x: 0.3, y: 0, z: 0.9 },
+        { x: -0.1, y: 0, z: 0.9 },
+        { x: 0.1, y: 0, z: 0.9 }
+    ];
+
+    enginePositions.forEach(pos => {
+        const engine = new THREE.Mesh(engineGeometry, engineMaterial);
+        engine.position.set(pos.x, pos.y, pos.z);
+        engine.rotation.x = Math.PI / 2;
+        shipGroup.add(engine);
+
+        // Engine glow (orange-blue gradient effect)
+        const innerGlowGeometry = new THREE.CylinderGeometry(0.06, 0.06, 0.05, 6);
+        const innerGlowMaterial = new THREE.MeshBasicMaterial({
+            color: 0xff6600, // Orange inner
+            transparent: true,
+            opacity: 0.9,
+            side: THREE.DoubleSide
+        });
+        const innerGlow = new THREE.Mesh(innerGlowGeometry, innerGlowMaterial);
+        innerGlow.position.set(pos.x, pos.y, pos.z + 0.15);
+        innerGlow.rotation.x = Math.PI / 2;
+        shipGroup.add(innerGlow);
+
+        // Outer engine glow (blue)
+        const outerGlowGeometry = new THREE.CylinderGeometry(0.08, 0.08, 0.02, 6);
+        const outerGlowMaterial = new THREE.MeshBasicMaterial({
+            color: 0x00aaff, // Light blue outer
+            transparent: true,
+            opacity: 0.5,
+            side: THREE.DoubleSide
+        });
+        const outerGlow = new THREE.Mesh(outerGlowGeometry, outerGlowMaterial);
+        outerGlow.position.set(pos.x, pos.y, pos.z + 0.16);
+        outerGlow.rotation.x = Math.PI / 2;
+        shipGroup.add(outerGlow);
+    });
+
+    // Red accent stripes
+    const stripeGeometry = new THREE.BoxGeometry(0.05, 0.01, 1.0);
+    const stripeMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0xff3333,
+        shininess: 90,
+        specular: 0x882222
+    });
+
+    // Left stripe
+    const leftStripe = new THREE.Mesh(stripeGeometry, stripeMaterial);
+    leftStripe.position.set(-0.3, 0.08, -0.2);
+    shipGroup.add(leftStripe);
+
+    // Right stripe
+    const rightStripe = new THREE.Mesh(stripeGeometry, stripeMaterial);
+    rightStripe.position.set(0.3, 0.08, -0.2);
+    shipGroup.add(rightStripe);
 
     // Health bar
     const healthBarWidth = 1;
@@ -83,21 +494,21 @@ function createPlayerShip() {
         side: THREE.DoubleSide
     });
     const healthBar = new THREE.Mesh(healthBarGeometry, healthBarMaterial);
-    healthBar.position.set(0, 1.2, -0.8);
-    healthBar.rotation.x = -Math.PI / 4;
+    healthBar.position.set(0, 0.8, -0.6);
+    healthBar.rotation.x = -Math.PI / 3;
     healthBar.userData.initialScale = healthBar.scale.x;
     shipGroup.add(healthBar);
     shipGroup.userData.healthBar = healthBar;
 
-    // Stamina bar (Dark Souls style)
+    // Stamina bar
     const staminaBarGeometry = new THREE.PlaneGeometry(healthBarWidth, healthBarHeight);
     const staminaBarMaterial = new THREE.MeshBasicMaterial({ 
-        color: 0xE8B71C, // Dark Souls stamina bar color
+        color: 0xE8B71C,
         side: THREE.DoubleSide
     });
     const staminaBar = new THREE.Mesh(staminaBarGeometry, staminaBarMaterial);
-    staminaBar.position.set(0, 1.2, -0.6); // Moved forward on Z-axis to appear below health bar
-    staminaBar.rotation.x = -Math.PI / 4;
+    staminaBar.position.set(0, 0.8, -0.4);
+    staminaBar.rotation.x = -Math.PI / 3;
     staminaBar.userData.initialScale = staminaBar.scale.x;
     shipGroup.add(staminaBar);
     shipGroup.userData.staminaBar = staminaBar;
@@ -110,16 +521,29 @@ const player = createPlayerShip();
 scene.add(player);
 
 // Camera setup (initial position)
-camera.position.set(0, 15, 0);
+camera.position.set(0, 20, 0);
 camera.lookAt(player.position);
 
-// Function to update camera position
-function updateCamera() {
-    // Update camera position to follow player while maintaining height
-    camera.position.x = player.position.x;
-    camera.position.z = player.position.z;
-    camera.lookAt(player.position);
+// Update field of view for better close-up perspective
+camera.fov = 60;
+camera.updateProjectionMatrix();
+
+// Adjust player health and stamina bar positions for better visibility at new camera height
+function updatePlayerBars() {
+    const healthBar = player.userData.healthBar;
+    const staminaBar = player.userData.staminaBar;
+    
+    // Position bars closer to player model
+    healthBar.position.set(0, 0.8, -0.6);  // Reduced height from 1.2 to 0.8
+    staminaBar.position.set(0, 0.8, -0.4); // Reduced height and moved slightly forward
+    
+    // Adjust rotation for better visibility
+    healthBar.rotation.x = -Math.PI / 3;  // Less steep angle
+    staminaBar.rotation.x = -Math.PI / 3;
 }
+
+// Call updatePlayerBars after creating player
+updatePlayerBars();
 
 // Movement controls
 const keys = {
@@ -232,12 +656,12 @@ function shoot(input) {
         bullet.position.copy(player.position);
         bullet.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
         bullet.userData.velocity = direction.multiplyScalar(0.5);
-        bullet.userData.maxDistance = 20;
+        bullet.userData.maxDistance = 15; // Reduced from 20 to match closer camera
         bullet.userData.initialPosition = bullet.position.clone();
         scene.add(bullet);
         bullets.push(bullet);
         
-        // Deduct stamina and update cooldown only after successfully creating a bullet
+        // Deduct stamina and update cooldown
         gameState.playerStamina = Math.max(0, gameState.playerStamina - gameState.staminaPerShot);
         gameState.lastShotTime = currentTime;
     }
@@ -348,15 +772,12 @@ function createCubeSphere(radius, detail, color = 0x666666) {
 }
 
 function spawnEnemy() {
-    // Increase size variance (now from 0.5 to 3.0, weighted towards smaller sizes)
     const size = 0.5 + Math.pow(Math.random(), 2) * 2.5;
     const enemy = createEnemyShip(size);
     
-    // Calculate spawn position relative to camera view
-    const spawnRadius = 30; // Distance from camera to spawn
+    const spawnRadius = 20; // Reduced from 30 to match closer camera
     const angle = Math.random() * Math.PI * 2;
     
-    // Calculate spawn position relative to player
     enemy.position.x = player.position.x + Math.cos(angle) * spawnRadius;
     enemy.position.z = player.position.z + Math.sin(angle) * spawnRadius;
     enemy.position.y = 0.5;
@@ -682,7 +1103,6 @@ function createProjectileImpact(position, color = 0xff00ff) {
         const angle = (i / particleCount) * Math.PI * 2;
         const radius = 0.3;
         
-        // Create shard geometry (flat and visible from above)
         const shardGeometry = new THREE.ConeGeometry(0.2, 0.4, 4);
         const shardMaterial = new THREE.MeshPhongMaterial({
             color: color,
@@ -693,22 +1113,19 @@ function createProjectileImpact(position, color = 0xff00ff) {
         });
         const shard = new THREE.Mesh(shardGeometry, shardMaterial);
         
-        // Position shard in a circle
         shard.position.set(
             Math.cos(angle) * radius,
-            0.5, // Slightly above ground
+            0.5,
             Math.sin(angle) * radius
         );
         
-        // Rotate shard to face outward
         shard.rotation.x = Math.PI / 2;
         shard.rotation.y = angle;
         
-        // Add velocity for animation
         shard.userData = {
             velocity: new THREE.Vector3(
                 Math.cos(angle) * 0.1,
-                0.05, // Slight upward velocity
+                0.05,
                 Math.sin(angle) * 0.1
             ),
             rotationSpeed: (Math.random() - 0.5) * 0.2,
@@ -720,7 +1137,7 @@ function createProjectileImpact(position, color = 0xff00ff) {
         impactGroup.add(shard);
     }
     
-    // Add a flash effect (flat circle on the ground)
+    // Add a flash effect
     const flashGeometry = new THREE.CircleGeometry(1, 16);
     const flashMaterial = new THREE.MeshBasicMaterial({
         color: color,
@@ -913,81 +1330,16 @@ function updateHUD() {
 
 createHUD();
 
-// Add tree creation function after createEnemyShip function
-function createTree(position) {
-    const treeGroup = new THREE.Group();
-    
-    // Tree trunk (brown cylinder)
-    const trunkGeometry = new THREE.CylinderGeometry(0.3, 0.4, 1.5, 8);
-    const trunkMaterial = new THREE.MeshPhongMaterial({ 
-        color: 0x8B4513,
-        flatShading: true 
-    });
-    const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
-    trunk.position.y = 0.75;
-    treeGroup.add(trunk);
-    
-    // Tree top (green cone for top-down perspective)
-    const topGeometry = new THREE.ConeGeometry(1.5, 2, 8);
-    const topMaterial = new THREE.MeshPhongMaterial({ 
-        color: 0x228B22,
-        flatShading: true 
-    });
-    const top = new THREE.Mesh(topGeometry, topMaterial);
-    top.position.y = 2;
-    treeGroup.add(top);
-    
-    // Set position
-    treeGroup.position.copy(position);
-    treeGroup.position.y = 0;
-    
-    // Add slight tilt for isometric feel (rotate around X and Z slightly)
-    const tiltAngle = Math.PI / 12; // 15 degrees
-    const randomRotation = Math.random() * Math.PI * 2; // Random rotation around Y
-    treeGroup.rotation.x = (Math.random() * 0.2 - 0.1) * tiltAngle; // Subtle random tilt
-    treeGroup.rotation.z = (Math.random() * 0.2 - 0.1) * tiltAngle; // Subtle random tilt
-    treeGroup.rotation.y = randomRotation; // Random rotation for variety
-    
-    // Add collision radius
-    treeGroup.userData.collisionRadius = 1.2;
-    
-    return treeGroup;
-}
-
-// Add tree spawning after ground creation
-const trees = [];
-function spawnTrees() {
-    const numberOfTrees = 20;
-    const mapSize = 100; // Adjust based on your game area
-    
-    for (let i = 0; i < numberOfTrees; i++) {
-        const x = (Math.random() - 0.5) * mapSize;
-        const z = (Math.random() - 0.5) * mapSize;
-        const position = new THREE.Vector3(x, 0, z);
-        
-        // Check distance from other trees to prevent overlap
-        let tooClose = false;
-        for (const tree of trees) {
-            if (position.distanceTo(tree.position) < 5) {
-                tooClose = true;
-                break;
-            }
-        }
-        
-        if (!tooClose) {
-            const tree = createTree(position);
-            scene.add(tree);
-            trees.push(tree);
-        }
-    }
-}
-
-spawnTrees();
-
 function animate() {
     requestAnimationFrame(animate);
 
     if (gameState.isGameOver) return;
+
+    // Update space background time uniform
+    ground.material.uniforms.time.value += 0.001;
+
+    const deltaTime = 0.016; // Assuming 60fps
+    updatePlanets(deltaTime);
 
     // Player movement (slower speed)
     const moveSpeed = 0.1;
@@ -998,10 +1350,10 @@ function animate() {
     if (keys.a) newPosition.x -= moveSpeed;
     if (keys.d) newPosition.x += moveSpeed;
 
-    // Check for tree collisions before applying movement
+    // Check for planet collisions before applying movement
     let canMove = true;
-    for (const tree of trees) {
-        if (newPosition.distanceTo(tree.position) < tree.userData.collisionRadius + 0.5) {
+    for (const planet of planets) {
+        if (newPosition.distanceTo(planet.position) < planet.userData.collisionRadius + 0.5) {
             canMove = false;
             break;
         }
@@ -1183,12 +1535,11 @@ function animate() {
             break;
         }
 
-        // Check for tree collisions
-        for (const tree of trees) {
-            if (bullet.position.distanceTo(tree.position) < tree.userData.collisionRadius) {
-                // Get tree color (use trunk color)
-                const treeColor = tree.children[0].material.color.getHex();
-                const impact = createProjectileImpact(bullet.position.clone(), treeColor);
+        // Check for planet collisions
+        for (const planet of planets) {
+            if (bullet.position.distanceTo(planet.position) < planet.userData.collisionRadius) {
+                const planetColor = planet.children[0].material.color.getHex();
+                const impact = createProjectileImpact(bullet.position.clone(), planetColor);
                 explosions.push(impact);
                 scene.remove(bullet);
                 bullets.splice(i, 1);
@@ -1198,7 +1549,7 @@ function animate() {
     }
 
     // Update enemies (clean up enemies that are too far from player)
-    const maxEnemyDistance = 100;
+    const maxEnemyDistance = 200;
     const enemySpeed = 0.05;
     const enemyRadius = 1.0;
 
@@ -1221,16 +1572,16 @@ function animate() {
             .subVectors(player.position, enemy.position)
             .normalize();
 
-        // Check for nearby trees and adjust direction
+        // Check for nearby planets and adjust direction
         let avoidanceVector = new THREE.Vector3();
-        trees.forEach(tree => {
-            const distanceToTree = enemy.position.distanceTo(tree.position);
-            if (distanceToTree < tree.userData.collisionRadius + enemyRadius + 1) {
-                const awayFromTree = new THREE.Vector3()
-                    .subVectors(enemy.position, tree.position)
+        planets.forEach(planet => {
+            const distanceToPlanet = enemy.position.distanceTo(planet.position);
+            if (distanceToPlanet < planet.userData.collisionRadius + enemyRadius + 1) {
+                const awayFromPlanet = new THREE.Vector3()
+                    .subVectors(enemy.position, planet.position)
                     .normalize()
-                    .multiplyScalar(1 / Math.max(0.1, distanceToTree));
-                avoidanceVector.add(awayFromTree);
+                    .multiplyScalar(1 / Math.max(0.1, distanceToPlanet));
+                avoidanceVector.add(awayFromPlanet);
             }
         });
         
@@ -1241,7 +1592,7 @@ function animate() {
         // Calculate perpendicular vector for sideways movement
         const perpendicular = new THREE.Vector3(-direction.z, 0, direction.x);
         
-        // Apply artistic swaying motion with tree avoidance
+        // Apply artistic swaying motion with planet avoidance
         const swayAmount = Math.sin(moveParams.time * moveParams.frequency + moveParams.offset) * moveParams.amplitude;
         const finalDirection = new THREE.Vector3()
             .addVectors(
@@ -1295,7 +1646,6 @@ function animate() {
     // Update explosions
     for (let i = explosions.length - 1; i >= 0; i--) {
         const explosion = explosions[i];
-        
         if (explosion.userData.particles) {
             // This is an impact effect
             explosion.userData.age += 0.016;
@@ -1355,7 +1705,7 @@ function animate() {
     }
 
     // Update hazards
-    spawnRandomHazard();
+    // spawnRandomHazard(); // Temporarily disabled
 
     // Update light beams
     for (let i = hazards.lightBeams.length - 1; i >= 0; i--) {
@@ -1631,9 +1981,9 @@ function animate() {
                 continue;
             }
             
-            // Check for tree collisions
-            for (const tree of trees) {
-                if (projectile.position.distanceTo(tree.position) < tree.userData.collisionRadius) {
+            // Check for planet collisions
+            for (const planet of planets) {
+                if (projectile.position.distanceTo(planet.position) < planet.userData.collisionRadius) {
                     const impact = createProjectileImpact(projectile.position.clone());
                     explosions.push(impact);
                     scene.remove(projectile);
@@ -1713,4 +2063,42 @@ function updateStaminaWarning() {
             warningElement.remove();
         }
     }
+}
+
+// Add after the planets creation, before the animation loop
+function updatePlanets(deltaTime) {
+    planets.forEach(planetGroup => {
+        // Update moon positions
+        if (planetGroup.userData.moons) {
+            planetGroup.userData.moons.forEach(moon => {
+                moon.userData.time += moon.userData.orbitSpeed;
+                
+                // Calculate new position
+                const x = Math.cos(moon.userData.time + moon.userData.orbitOffset) * moon.userData.orbitRadius;
+                const z = Math.sin(moon.userData.time + moon.userData.orbitOffset) * moon.userData.orbitRadius;
+                
+                moon.position.set(x, 0, z);
+            });
+        }
+
+        // Rotate rings if present
+        if (planetGroup.userData.hasRings) {
+            const ring = planetGroup.children.find(child => child.geometry instanceof THREE.RingGeometry);
+            if (ring) {
+                ring.rotation.z += 0.0001;
+            }
+        }
+    });
+}
+
+// Update the far plane of the camera to prevent clipping
+camera.far = 2000; // Increased from 1000
+camera.updateProjectionMatrix();
+
+// Function to update camera position
+function updateCamera() {
+    // Update camera position to follow player while maintaining height
+    camera.position.x = player.position.x;
+    camera.position.z = player.position.z;
+    camera.lookAt(player.position);
 } 
