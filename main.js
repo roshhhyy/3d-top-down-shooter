@@ -169,10 +169,14 @@ function shoot(mousePosition) {
         // Project mouse position to 3D space
         vector.unproject(camera);
         const dir = vector.sub(camera.position).normalize();
-        const distance = -camera.position.y / dir.y;
+        
+        // Calculate direction vector in the horizontal plane (ignore vertical component)
+        const horizontalDir = new THREE.Vector3(dir.x, 0, dir.z).normalize();
+        
+        // Calculate target position at fixed distance
         const targetPos = new THREE.Vector3()
-            .copy(camera.position)
-            .add(dir.multiplyScalar(distance));
+            .copy(player.position)
+            .add(horizontalDir.multiplyScalar(20)); // Fixed distance of 20 units
 
         // Calculate direction from player to target
         const direction = new THREE.Vector3()
@@ -180,7 +184,14 @@ function shoot(mousePosition) {
             .normalize();
 
         // Create bullet
-        createBullet(player.position.clone(), direction);
+        const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
+        bullet.position.copy(player.position);
+        bullet.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
+        bullet.userData.velocity = direction.multiplyScalar(0.5);
+        bullet.userData.maxDistance = 20; // Set fixed distance
+        bullet.userData.initialPosition = bullet.position.clone();
+        scene.add(bullet);
+        bullets.push(bullet);
         gameState.lastShotTime = currentTime;
     }
 }
@@ -880,8 +891,8 @@ function animate() {
         const bullet = bullets[i];
         bullet.position.add(bullet.userData.velocity);
 
-        // Remove bullets that are too far from player
-        if (bullet.position.distanceTo(player.position) > 50) {
+        // Remove bullets that exceed fixed distance
+        if (bullet.position.distanceTo(bullet.userData.initialPosition) > bullet.userData.maxDistance) {
             scene.remove(bullet);
             bullets.splice(i, 1);
             continue;
