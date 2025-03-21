@@ -43,3 +43,24 @@ This project is currently in development. Future features may include:
 - Power-ups and upgrades
 - Multiple levels
 - Sound effects and music 
+
+## Misc
+
+To properly close the game and prevent resource leaks, you should follow these steps in order:
+- First, close the browser tab/window running the game
+- Then, stop the Python server by pressing Ctrl + C in the terminal where the server is running
+- Finally, close the terminal window
+
+This ensures that:
+- The browser releases all WebGL and other game resources
+- The Python server is properly terminated
+- All system resources are properly cleaned up
+
+If you want to be extra thorough, you can also:
+
+pkill -f "python3 -m http.server" 
+
+The proper shutdown sequence is important because:
+- The game uses WebGL resources that need to be properly released
+- The Python server needs to clean up its network connections
+- The browser needs to free up memory and GPU resources

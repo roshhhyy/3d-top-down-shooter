@@ -246,68 +246,111 @@ function shoot(input) {
 // Enemies
 const enemies = [];
 
-function createEnemyShip() {
-    const shipGroup = new THREE.Group();
+function createEnemyShip(size = 1) {
+    const enemyGroup = new THREE.Group();
     
-    // Randomize enemy size and properties
-    const sizeScale = 0.5 + Math.random() * 1.5; // Random size between 0.5x and 2.0x
-    const baseHealth = 100;
-    const baseSpeed = 0.05;
+    // Create the main body using the new cube sphere design with varied colors
+    const body = createCubeSphere(size * 0.5, 8, getRandomEnemyColor()); // Added color parameter
+    enemyGroup.add(body);
     
-    // Main body
-    const bodyGeometry = new THREE.ConeGeometry(0.4 * sizeScale, 1 * sizeScale, 6);
-    const hue = 0; // Red base color
-    const saturation = 0.7 + Math.random() * 0.3; // Vary saturation
-    const lightness = 0.3 + Math.random() * 0.2; // Vary lightness
-    const color = new THREE.Color().setHSL(hue, saturation, lightness);
-    const bodyMaterial = new THREE.MeshPhongMaterial({ color: color });
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    body.rotation.x = Math.PI / 2;
-    shipGroup.add(body);
-
-    // Wings (vary wing shape)
-    const wingWidth = 1 * sizeScale;
-    const wingDepth = 0.3 * sizeScale;
-    const wingGeometry = new THREE.BoxGeometry(wingWidth, 0.1, wingDepth);
-    const wingMaterial = new THREE.MeshPhongMaterial({ color: color.clone().multiplyScalar(0.7) });
-    const leftWing = new THREE.Mesh(wingGeometry, wingMaterial);
-    leftWing.position.set(-0.5 * sizeScale, 0, 0);
-    const rightWing = new THREE.Mesh(wingGeometry, wingMaterial);
-    rightWing.position.set(0.5 * sizeScale, 0, 0);
-    shipGroup.add(leftWing);
-    shipGroup.add(rightWing);
-
-    // Health bar (scaled with size)
-    const healthBarWidth = 1 * sizeScale;
-    const healthBarHeight = 0.1;
+    // Add health bar (single bar, properly colored)
+    const healthBarWidth = size * 1.2;
+    const healthBarHeight = size * 0.1;
     const healthBarGeometry = new THREE.PlaneGeometry(healthBarWidth, healthBarHeight);
     const healthBarMaterial = new THREE.MeshBasicMaterial({ 
-        color: 0xff0000,
-        side: THREE.DoubleSide
+        color: 0x00ff00,
+        side: THREE.DoubleSide 
     });
     const healthBar = new THREE.Mesh(healthBarGeometry, healthBarMaterial);
-    healthBar.position.set(0, 1.2 * sizeScale, -0.8);
-    healthBar.rotation.x = -Math.PI / 4;
+    healthBar.position.y = size * 0.8;
     healthBar.userData.initialScale = healthBar.scale.x;
-    shipGroup.add(healthBar);
-    shipGroup.userData.healthBar = healthBar;
-
-    // Set enemy properties based on size
-    shipGroup.userData.health = baseHealth * sizeScale;
-    shipGroup.userData.maxHealth = baseHealth * sizeScale;
-    shipGroup.userData.speed = baseSpeed * (1.3 - sizeScale * 0.3); // Larger enemies move slower
-    shipGroup.userData.moveParams = {
-        offset: Math.random() * Math.PI * 2,
-        amplitude: 0.2 + Math.random() * 0.3,
-        frequency: 0.5 + Math.random() * 0.5,
-        time: 0
+    enemyGroup.add(healthBar);
+    
+    // Set up enemy properties
+    const maxHealth = size * 100;
+    enemyGroup.userData = {
+        isEnemy: true,
+        health: maxHealth,
+        maxHealth: maxHealth,
+        healthBar: healthBar,
+        size: size,
+        speed: 0.05 / size, // Larger enemies move slower
+        moveParams: {
+            offset: Math.random() * Math.PI * 2,
+            amplitude: 0.2 + Math.random() * 0.3,
+            frequency: 0.5 + Math.random() * 0.5,
+            time: 0
+        }
     };
+    
+    return enemyGroup;
+}
 
-    return shipGroup;
+// Add function to generate random enemy colors
+function getRandomEnemyColor() {
+    // Array of vibrant colors that will stand out against the dark background
+    const colors = [
+        0xff4444, // bright red
+        0x44ff44, // bright green
+        0x4444ff, // bright blue
+        0xff44ff, // bright magenta
+        0x44ffff, // bright cyan
+        0xffff44, // bright yellow
+        0xff8844, // bright orange
+        0xff4488, // bright pink
+    ];
+    return colors[Math.floor(Math.random() * colors.length)];
+}
+
+function createCubeSphere(radius, detail, color = 0x666666) {
+    const group = new THREE.Group();
+    const cubeSize = radius / (detail * 0.5);
+    
+    // Create cubes in a spherical pattern
+    for (let phi = 0; phi < Math.PI * 2; phi += Math.PI / detail) {
+        for (let theta = 0; theta < Math.PI * 2; theta += Math.PI / detail) {
+            const r = radius + (Math.random() - 0.5) * (cubeSize * 0.5); // Add some variation
+            
+            // Convert spherical to cartesian coordinates
+            const x = r * Math.cos(theta) * Math.sin(phi);
+            const y = r * Math.sin(theta) * Math.sin(phi);
+            const z = r * Math.cos(phi);
+            
+            // Randomly choose between cube and cylinder for some variation
+            let geometry;
+            if (Math.random() > 0.3) {
+                geometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
+            } else {
+                geometry = new THREE.CylinderGeometry(cubeSize * 0.3, cubeSize * 0.3, cubeSize, 8);
+            }
+            
+            const material = new THREE.MeshPhongMaterial({
+                color: color,
+                specular: 0x333333,
+                shininess: 30,
+                flatShading: true
+            });
+            
+            const cube = new THREE.Mesh(geometry, material);
+            cube.position.set(x, y, z);
+            
+            // Make cubes face outward from center
+            cube.lookAt(0, 0, 0);
+            
+            // Random rotation for more variety
+            cube.rotation.z = Math.random() * Math.PI * 2;
+            
+            group.add(cube);
+        }
+    }
+    
+    return group;
 }
 
 function spawnEnemy() {
-    const enemy = createEnemyShip();
+    // Increase size variance (now from 0.5 to 3.0, weighted towards smaller sizes)
+    const size = 0.5 + Math.pow(Math.random(), 2) * 2.5;
+    const enemy = createEnemyShip(size);
     
     // Calculate spawn position relative to camera view
     const spawnRadius = 30; // Distance from camera to spawn
@@ -629,7 +672,7 @@ function createBossProjectile(position, direction) {
 }
 
 // Add projectile impact effect function
-function createProjectileImpact(position) {
+function createProjectileImpact(position, color = 0xff00ff) {
     const impactGroup = new THREE.Group();
     const particleCount = 12;
     const particles = [];
@@ -642,8 +685,8 @@ function createProjectileImpact(position) {
         // Create shard geometry (flat and visible from above)
         const shardGeometry = new THREE.ConeGeometry(0.2, 0.4, 4);
         const shardMaterial = new THREE.MeshPhongMaterial({
-            color: 0xff00ff,
-            emissive: 0x800080,
+            color: color,
+            emissive: new THREE.Color(color).multiplyScalar(0.5),
             emissiveIntensity: 0.5,
             transparent: true,
             opacity: 0.8
@@ -680,7 +723,7 @@ function createProjectileImpact(position) {
     // Add a flash effect (flat circle on the ground)
     const flashGeometry = new THREE.CircleGeometry(1, 16);
     const flashMaterial = new THREE.MeshBasicMaterial({
-        color: 0xff00ff,
+        color: color,
         transparent: true,
         opacity: 0.7
     });
@@ -704,45 +747,103 @@ function createProjectileImpact(position) {
     return impactGroup;
 }
 
+// Add a specialized cube sphere creation function for the boss
+function createBossCubeSphere(radius, detail, color = 0x800080) {
+    const group = new THREE.Group();
+    const cubeSize = radius / (detail * 0.5);
+    
+    // Reduce the number of iterations for better performance
+    for (let phi = 0; phi < Math.PI * 2; phi += Math.PI / (detail * 0.5)) {
+        for (let theta = 0; theta < Math.PI * 2; theta += Math.PI / (detail * 0.5)) {
+            const r = radius + (Math.random() - 0.5) * (cubeSize * 0.3);
+            
+            // Convert spherical to cartesian coordinates
+            const x = r * Math.cos(theta) * Math.sin(phi);
+            const y = r * Math.sin(theta) * Math.sin(phi);
+            const z = r * Math.cos(phi);
+            
+            // Create main cube with reduced geometry segments
+            const geometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
+            const material = new THREE.MeshPhongMaterial({
+                color: color,
+                specular: 0x440044,
+                shininess: 30,
+                flatShading: true
+            });
+            
+            const cube = new THREE.Mesh(geometry, material);
+            cube.position.set(x, y, z);
+            cube.lookAt(0, 0, 0);
+            
+            // Add spikes more selectively (only on outer layer)
+            if (Math.random() > 0.7 && r > radius * 0.8) {
+                const spikeLength = cubeSize * 1.2;
+                const spikeGeometry = new THREE.ConeGeometry(cubeSize * 0.2, spikeLength, 4);
+                const spikeMaterial = new THREE.MeshPhongMaterial({
+                    color: new THREE.Color(color).multiplyScalar(1.2),
+                    specular: 0x440044,
+                    shininess: 30,
+                    flatShading: true
+                });
+                
+                const spike = new THREE.Mesh(spikeGeometry, spikeMaterial);
+                spike.position.set(0, spikeLength/2, 0);
+                spike.rotation.x = Math.PI/2;
+                
+                const spikeContainer = new THREE.Group();
+                spikeContainer.add(spike);
+                spikeContainer.position.copy(cube.position);
+                spikeContainer.lookAt(0, 0, 0);
+                
+                group.add(spikeContainer);
+            }
+            
+            group.add(cube);
+        }
+    }
+    
+    return group;
+}
+
 function createBossEnemy() {
     const bossGroup = new THREE.Group();
     
-    // Main body (slightly smaller purple sphere)
-    const bodyGeometry = new THREE.SphereGeometry(2.5, 32, 32); // Reduced from 3
+    // Main body (simple sphere)
+    const bodyGeometry = new THREE.SphereGeometry(3.0, 16, 16); // Reduced segments for performance
     const bodyMaterial = new THREE.MeshPhongMaterial({
         color: 0x800080,
-        emissive: 0x400040,
-        emissiveIntensity: 0.3,
-        shininess: 50
+        specular: 0x440044,
+        shininess: 30,
+        flatShading: true
     });
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    bossGroup.add(body);
-
-    // Spikes around the body (adjusted for smaller size)
-    const spikeCount = 8;
-    for (let i = 0; i < spikeCount; i++) {
-        const angle = (i / spikeCount) * Math.PI * 2;
-        const spikeGeometry = new THREE.ConeGeometry(0.4, 1.6, 4); // Reduced size
-        const spikeMaterial = new THREE.MeshPhongMaterial({
+    const mainBody = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    bossGroup.add(mainBody);
+    
+    // Static ring of cubes
+    const ringRadius = 4.5;
+    const cubeCount = 16;
+    const cubeSize = 0.8;
+    
+    for (let i = 0; i < cubeCount; i++) {
+        const angle = (i / cubeCount) * Math.PI * 2;
+        const geometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
+        const material = new THREE.MeshPhongMaterial({
             color: 0xff00ff,
-            emissive: 0x800080,
-            emissiveIntensity: 0.3
+            specular: 0x440044,
+            shininess: 30,
+            flatShading: true
         });
-        const spike = new THREE.Mesh(spikeGeometry, spikeMaterial);
-        spike.position.set(
-            Math.cos(angle) * 2.5, // Adjusted radius
+        
+        const cube = new THREE.Mesh(geometry, material);
+        cube.position.set(
+            Math.cos(angle) * ringRadius,
             0,
-            Math.sin(angle) * 2.5
+            Math.sin(angle) * ringRadius
         );
-        spike.lookAt(new THREE.Vector3(
-            Math.cos(angle) * 5,
-            0,
-            Math.sin(angle) * 5
-        ));
-        bossGroup.add(spike);
+        bossGroup.add(cube);
     }
-
-    // Health bar (same size for visibility)
+    
+    // Health bar
     const healthBarWidth = 4;
     const healthBarHeight = 0.3;
     const healthBarGeometry = new THREE.PlaneGeometry(healthBarWidth, healthBarHeight);
@@ -751,14 +852,14 @@ function createBossEnemy() {
         side: THREE.DoubleSide
     });
     const healthBar = new THREE.Mesh(healthBarGeometry, healthBarMaterial);
-    healthBar.position.set(0, 3.5, 0); // Adjusted height
+    healthBar.position.set(0, 4.5, 0);
     healthBar.rotation.x = -Math.PI / 4;
     healthBar.userData.initialScale = healthBar.scale.x;
     bossGroup.add(healthBar);
     bossGroup.userData.healthBar = healthBar;
-
-    // Reduced boss properties
-    bossGroup.userData.health = 500; // Reduced from 1000
+    
+    // Boss properties
+    bossGroup.userData.health = 500;
     bossGroup.userData.maxHealth = 500;
     bossGroup.userData.moveSpeed = 0.05;
     bossGroup.position.set(0, 2, -40);
@@ -1017,12 +1118,14 @@ function animate() {
         for (let j = enemies.length - 1; j >= 0; j--) {
             const enemy = enemies[j];
             if (bullet.position.distanceTo(enemy.position) < 1) {
-                // Create impact effect
-                const impact = createProjectileImpact(bullet.position.clone());
+                // Get enemy color from its first mesh component
+                const enemyColor = enemy.children[0].children[0].material.color.getHex();
+                // Create impact effect with enemy color
+                const impact = createProjectileImpact(bullet.position.clone(), enemyColor);
                 explosions.push(impact);
                 
                 // Deal damage to enemy
-                enemy.userData.health -= 20; // Reduced from one-shot to 20 damage per hit
+                enemy.userData.health -= 20;
                 
                 // Update enemy health bar
                 const healthPercent = enemy.userData.health / enemy.userData.maxHealth;
@@ -1040,7 +1143,7 @@ function animate() {
                     
                     // Update stats
                     gameStats.kills++;
-                    gameStats.score += enemy.userData.maxHealth; // Add enemy's max health to score
+                    gameStats.score += enemy.userData.maxHealth;
                     updateHUD();
                 }
                 break;
@@ -1049,8 +1152,10 @@ function animate() {
 
         // Check for boss collision
         if (bossState.boss && bullet.position.distanceTo(bossState.boss.position) < 3) {
-            // Create impact effect
-            const impact = createProjectileImpact(bullet.position.clone());
+            // Get boss color
+            const bossColor = bossState.boss.children[0].material.color.getHex();
+            // Create impact effect with boss color
+            const impact = createProjectileImpact(bullet.position.clone(), bossColor);
             explosions.push(impact);
             
             // Deal damage to boss
@@ -1081,7 +1186,9 @@ function animate() {
         // Check for tree collisions
         for (const tree of trees) {
             if (bullet.position.distanceTo(tree.position) < tree.userData.collisionRadius) {
-                const impact = createProjectileImpact(bullet.position.clone());
+                // Get tree color (use trunk color)
+                const treeColor = tree.children[0].material.color.getHex();
+                const impact = createProjectileImpact(bullet.position.clone(), treeColor);
                 explosions.push(impact);
                 scene.remove(bullet);
                 bullets.splice(i, 1);
@@ -1419,7 +1526,7 @@ function animate() {
             player.position.x - boss.position.x
         );
         const distanceToPlayer = boss.position.distanceTo(player.position);
-        const targetDistance = 20; // Desired distance from player
+        const targetDistance = 20;
         
         // Calculate movement
         const moveSpeed = boss.userData.moveSpeed;
@@ -1589,10 +1696,16 @@ function updateStaminaWarning() {
             warningElement = document.createElement('div');
             warningElement.id = 'staminaWarning';
             warningElement.textContent = 'Low stamina!';
+            warningElement.style.position = 'fixed';
+            warningElement.style.left = '50%';
+            warningElement.style.top = '55%'; // Position it slightly below center
+            warningElement.style.transform = 'translate(-50%, -50%)'; // Center the element
             warningElement.style.color = '#E8B71C';
             warningElement.style.fontWeight = 'bold';
             warningElement.style.animation = 'pulse 1s infinite';
-            document.getElementById('hudContainer').appendChild(warningElement);
+            warningElement.style.zIndex = '1000'; // Ensure it appears above other elements
+            warningElement.style.textShadow = '2px 2px 4px rgba(0, 0, 0, 0.5)'; // Add shadow for better visibility
+            document.body.appendChild(warningElement); // Append to body instead of HUD container
         }
     } else {
         // Remove warning if it exists
