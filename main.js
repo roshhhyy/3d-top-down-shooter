@@ -17,7 +17,13 @@ const gameState = {
     shootingCooldown: 100, // 100ms between shots for SMG
     staminaPerShot: 2, // Stamina cost per shot
     staminaRechargeRate: 15, // Stamina recovered per second
-    mousePosition: new THREE.Vector2() // Store mouse position globally
+    mousePosition: new THREE.Vector2(), // Store mouse position globally
+    isGameStarted: false,
+    startTime: 0, // Add this line to track when the game started
+    elapsedTime: 0, // Add this line to track elapsed time
+    lastTimeUpdate: 0, // Add this line to track last time update
+    currentWeapon: 'normal', // Add current weapon state
+    powerWeaponAmmo: 0 // Add power weapon ammo count
 };
 
 // Add after gameState declaration
@@ -42,6 +48,202 @@ const staminaWarning = {
     fadeSpeed: 0.1,
     isVisible: false
 };
+
+// Add after gameState declaration
+const pickups = {
+    health: [],
+    weapon: [], // Add weapon pickups array
+    spawnInterval: 10000, // Spawn a new health pickup every 10 seconds
+    lastSpawnTime: 0,
+    weaponSpawnInterval: 10000, // Reduced from 15000 to 10000 for more frequent drops
+    lastWeaponSpawnTime: 0
+};
+
+// Add after the pickups state declaration and before the lighting setup
+function createHealthPickup(x, z) {
+    const pickup = new THREE.Group();
+    
+    // Create the white background cross
+    const backGeometry = new THREE.BoxGeometry(1.2, 1.2, 0.1);
+    const backMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff });
+    const background = new THREE.Mesh(backGeometry, backMaterial);
+    background.rotation.x = -Math.PI / 2; // Lay flat
+    pickup.add(background);
+    
+    // Create the red cross
+    const crossGeometry = new THREE.BoxGeometry(0.8, 0.3, 0.15);
+    const crossMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0xff0000,
+        emissive: 0x330000
+    });
+    const horizontalCross = new THREE.Mesh(crossGeometry, crossMaterial);
+    horizontalCross.rotation.x = -Math.PI / 2;
+    horizontalCross.position.y = 0.05;
+    pickup.add(horizontalCross);
+    
+    const verticalCross = new THREE.Mesh(crossGeometry, crossMaterial);
+    verticalCross.rotation.x = -Math.PI / 2;
+    verticalCross.rotation.z = Math.PI / 2;
+    verticalCross.position.y = 0.05;
+    pickup.add(verticalCross);
+    
+    // Add green glow effect
+    const glowGeometry = new THREE.CircleGeometry(0.8, 16);
+    const glowMaterial = new THREE.MeshBasicMaterial({
+        color: 0x00ff00,
+        transparent: true,
+        opacity: 0.3,
+        side: THREE.DoubleSide
+    });
+    const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.y = 0.02;
+    pickup.add(glow);
+    
+    pickup.position.set(x, 0.5, z);
+    pickup.userData = {
+        type: 'health',
+        healAmount: 50,
+        rotationSpeed: 0.02,
+        bobSpeed: 2,
+        bobHeight: 0.2,
+        initialY: 0.5,
+        spawnTime: Date.now()
+    };
+    
+    scene.add(pickup);
+    pickups.health.push(pickup);
+    return pickup;
+}
+
+function spawnHealthPickup() {
+    const currentTime = Date.now();
+    if (currentTime - pickups.lastSpawnTime >= pickups.spawnInterval) {
+        const spawnRadius = 30;
+        const angle = Math.random() * Math.PI * 2;
+        const x = player.position.x + Math.cos(angle) * spawnRadius;
+        const z = player.position.z + Math.sin(angle) * spawnRadius;
+        
+        // Check if spawn location is clear of planets
+        let canSpawn = true;
+        for (const planet of planets) {
+            if (new THREE.Vector2(x - planet.position.x, z - planet.position.z).length() < planet.userData.collisionRadius + 2) {
+                canSpawn = false;
+                break;
+            }
+        }
+        
+        if (canSpawn) {
+            createHealthPickup(x, z);
+            pickups.lastSpawnTime = currentTime;
+        }
+    }
+}
+
+// Add weapon pickup creation function
+function createWeaponPickup(x, z) {
+    const pickup = new THREE.Group();
+    
+    // Create the main body of the gun (sleek and angular)
+    const bodyGeometry = new THREE.BoxGeometry(0.8, 0.3, 1.5);
+    const bodyMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0x444444,
+        specular: 0x666666
+    });
+    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    body.rotation.x = -Math.PI / 2; // Lay flat
+    pickup.add(body);
+    
+    // Create the barrel (longer and more prominent)
+    const barrelGeometry = new THREE.CylinderGeometry(0.15, 0.15, 2.0, 8);
+    const barrelMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0x222222,
+        specular: 0x444444
+    });
+    const barrel = new THREE.Mesh(barrelGeometry, barrelMaterial);
+    barrel.rotation.x = -Math.PI / 2;
+    barrel.position.z = 0.8;
+    pickup.add(barrel);
+    
+    // Create the energy core (glowing sphere at the back)
+    const coreGeometry = new THREE.SphereGeometry(0.3, 16, 16);
+    const coreMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0xff00ff,
+        emissive: 0x800080,
+        emissiveIntensity: 0.8,
+        transparent: true,
+        opacity: 0.9
+    });
+    const core = new THREE.Mesh(coreGeometry, coreMaterial);
+    core.position.z = -0.5;
+    pickup.add(core);
+    
+    // Add energy rings around the core
+    for (let i = 0; i < 3; i++) {
+        const ringGeometry = new THREE.TorusGeometry(0.4 + i * 0.1, 0.05, 16, 32);
+        const ringMaterial = new THREE.MeshBasicMaterial({
+            color: 0xff00ff,
+            transparent: true,
+            opacity: 0.5,
+            side: THREE.DoubleSide
+        });
+        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.z = -0.5;
+        pickup.add(ring);
+    }
+    
+    // Add energy glow at barrel tip
+    const glowGeometry = new THREE.SphereGeometry(0.2, 8, 8);
+    const glowMaterial = new THREE.MeshBasicMaterial({
+        color: 0xff00ff,
+        transparent: true,
+        opacity: 0.8
+    });
+    const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+    glow.position.z = 1.8;
+    pickup.add(glow);
+    
+    pickup.position.set(x, 0.5, z);
+    pickup.userData = {
+        type: 'weapon',
+        ammoAmount: 120,
+        rotationSpeed: 0.02,
+        bobSpeed: 2,
+        bobHeight: 0.2,
+        initialY: 0.5,
+        spawnTime: Date.now()
+    };
+    
+    scene.add(pickup);
+    pickups.weapon.push(pickup);
+    return pickup;
+}
+
+// Add weapon pickup spawn function
+function spawnWeaponPickup() {
+    const currentTime = Date.now();
+    if (currentTime - pickups.lastWeaponSpawnTime >= pickups.weaponSpawnInterval) {
+        const spawnRadius = 30;
+        const angle = Math.random() * Math.PI * 2;
+        const x = player.position.x + Math.cos(angle) * spawnRadius;
+        const z = player.position.z + Math.sin(angle) * spawnRadius;
+        
+        // Check if spawn location is clear of planets
+        let canSpawn = true;
+        for (const planet of planets) {
+            if (new THREE.Vector2(x - planet.position.x, z - planet.position.z).length() < planet.userData.collisionRadius + 2) {
+                canSpawn = false;
+                break;
+            }
+        }
+        
+        if (canSpawn) {
+            createWeaponPickup(x, z);
+            pickups.lastWeaponSpawnTime = currentTime;
+        }
+    }
+}
 
 // Lighting
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -592,20 +794,49 @@ window.addEventListener('mousemove', (event) => {
 
 // Projectiles
 const bullets = [];
-const bulletGeometry = new THREE.CylinderGeometry(0.05, 0.05, 0.3, 8);
+const bulletGeometry = new THREE.CylinderGeometry(0.08, 0.08, 0.4, 8); // Increased radius and length
 const bulletMaterial = new THREE.MeshPhongMaterial({ 
     color: 0x00ffff,
     emissive: 0x0088ff,
-    emissiveIntensity: 0.5
+    emissiveIntensity: 0.8,
+    transparent: true,
+    opacity: 0.9
 });
 
 function createBullet(position, direction) {
+    // Create bullet group to hold both bullet and trail
+    const bulletGroup = new THREE.Group();
+    bulletGroup.position.copy(position);
+    
+    // Main bullet
     const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
-    bullet.position.copy(position);
-    bullet.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
-    bullet.userData.velocity = direction.multiplyScalar(0.5);
-    scene.add(bullet);
-    bullets.push(bullet);
+    bulletGroup.add(bullet);
+    
+    // Simple trail (just 3 segments to keep it lightweight)
+    const trailMaterial = new THREE.MeshBasicMaterial({
+        color: 0x00ffff,
+        transparent: true,
+        opacity: 0.5
+    });
+    
+    const trailSegments = [];
+    for (let i = 0; i < 3; i++) {
+        const trailGeometry = new THREE.CylinderGeometry(0.06, 0.06, 0.3, 8); // Increased from 0.03 to 0.06
+        const trail = new THREE.Mesh(trailGeometry, trailMaterial.clone());
+        trail.material.opacity = 0.5 - (i * 0.15); // Fade out each segment
+        trail.position.z = -(i + 1) * 0.3; // Increased spacing between segments
+        bulletGroup.add(trail);
+        trailSegments.push(trail);
+    }
+    
+    bulletGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
+    bulletGroup.userData.velocity = direction.multiplyScalar(0.5);
+    bulletGroup.userData.trailSegments = trailSegments;
+    bulletGroup.userData.maxDistance = 15;
+    bulletGroup.userData.initialPosition = bulletGroup.position.clone();
+    
+    scene.add(bulletGroup);
+    bullets.push(bulletGroup);
 }
 
 function shoot(input) {
@@ -651,15 +882,65 @@ function shoot(input) {
     if (currentTime - gameState.lastShotTime >= gameState.shootingCooldown && 
         gameState.playerStamina >= gameState.staminaPerShot) {
         
-        // Create bullet with the calculated direction
-        const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
-        bullet.position.copy(player.position);
-        bullet.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
-        bullet.userData.velocity = direction.multiplyScalar(0.5);
-        bullet.userData.maxDistance = 15; // Reduced from 20 to match closer camera
-        bullet.userData.initialPosition = bullet.position.clone();
-        scene.add(bullet);
-        bullets.push(bullet);
+        if (gameState.currentWeapon === 'power' && gameState.powerWeaponAmmo > 0) {
+            // Power weapon shooting (more powerful, faster bullets)
+            const powerBulletGeometry = new THREE.CylinderGeometry(0.12, 0.12, 0.6, 12); // Larger bullet
+            const powerBulletMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0xff00ff,
+                emissive: 0x800080,
+                emissiveIntensity: 0.8,
+                transparent: true,
+                opacity: 0.9
+            });
+            const bullet = new THREE.Mesh(powerBulletGeometry, powerBulletMaterial);
+            bullet.position.copy(player.position);
+            bullet.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
+            bullet.userData.velocity = direction.multiplyScalar(0.8); // Faster bullets
+            bullet.userData.maxDistance = 20; // Longer range
+            bullet.userData.damage = 40; // More damage
+            bullet.userData.initialPosition = bullet.position.clone();
+            
+            // Add power bullet trail
+            const trailMaterial = new THREE.MeshBasicMaterial({
+                color: 0xff00ff,
+                transparent: true,
+                opacity: 0.5
+            });
+            
+            const trailSegments = [];
+            for (let i = 0; i < 4; i++) { // More trail segments
+                const trailGeometry = new THREE.CylinderGeometry(0.1, 0.1, 0.4, 8); // Larger trail
+                const trail = new THREE.Mesh(trailGeometry, trailMaterial.clone());
+                trail.material.opacity = 0.5 - (i * 0.1); // Fade out each segment
+                trail.position.z = -(i + 1) * 0.4; // Increased spacing between segments
+                bullet.add(trail);
+                trailSegments.push(trail);
+            }
+            
+            bullet.userData.trailSegments = trailSegments;
+            scene.add(bullet);
+            bullets.push(bullet);
+            
+            // Deduct ammo
+            gameState.powerWeaponAmmo--;
+            
+            // Switch back to normal weapon if out of ammo
+            if (gameState.powerWeaponAmmo <= 0) {
+                gameState.currentWeapon = 'normal';
+                updateHUD();
+            }
+        } else {
+            // Normal weapon shooting
+            const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
+            bullet.position.copy(player.position);
+            bullet.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
+            bullet.userData.velocity = direction.multiplyScalar(0.5);
+            bullet.userData.maxDistance = 15;
+            bullet.userData.damage = 20;
+            bullet.userData.initialPosition = bullet.position.clone();
+            scene.add(bullet);
+            bullets.push(bullet);
+        }
         
         // Deduct stamina and update cooldown
         gameState.playerStamina = Math.max(0, gameState.playerStamina - gameState.staminaPerShot);
@@ -670,12 +951,43 @@ function shoot(input) {
 // Enemies
 const enemies = [];
 
-function createEnemyShip(size = 1) {
+// Add after getRandomEnemyColor function
+function createEnemyShip(size = 1, type = 'normal') {
     const enemyGroup = new THREE.Group();
     
-    // Create the main body using the new cube sphere design with varied colors
-    const body = createCubeSphere(size * 0.5, 8, getRandomEnemyColor()); // Added color parameter
+    // Create the main body using the new cube sphere design
+    const body = createCubeSphere(size * 0.5, 8, type === 'sniper' ? 0x000000 : getRandomEnemyColor());
     enemyGroup.add(body);
+    
+    // Add red glow effect for sniper enemies
+    if (type === 'sniper') {
+        const glowGeometry = new THREE.SphereGeometry(size * 0.6, 16, 16);
+        const glowMaterial = new THREE.MeshBasicMaterial({
+            color: 0xff0000,
+            transparent: true,
+            opacity: 0.3,
+            side: THREE.DoubleSide
+        });
+        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+        enemyGroup.add(glow);
+        
+        // Add red accent stripes
+        const stripeGeometry = new THREE.BoxGeometry(size * 0.8, size * 0.1, size * 0.1);
+        const stripeMaterial = new THREE.MeshPhongMaterial({
+            color: 0xff0000,
+            emissive: 0x800000,
+            emissiveIntensity: 0.5
+        });
+        
+        // Add stripes in a cross pattern
+        const stripe1 = new THREE.Mesh(stripeGeometry, stripeMaterial);
+        stripe1.rotation.z = Math.PI / 4;
+        enemyGroup.add(stripe1);
+        
+        const stripe2 = new THREE.Mesh(stripeGeometry, stripeMaterial);
+        stripe2.rotation.z = -Math.PI / 4;
+        enemyGroup.add(stripe2);
+    }
     
     // Add health bar (single bar, properly colored)
     const healthBarWidth = size * 1.2;
@@ -683,7 +995,7 @@ function createEnemyShip(size = 1) {
     const healthBarGeometry = new THREE.PlaneGeometry(healthBarWidth, healthBarHeight);
     const healthBarMaterial = new THREE.MeshBasicMaterial({ 
         color: 0x00ff00,
-        side: THREE.DoubleSide 
+        side: THREE.DoubleSide
     });
     const healthBar = new THREE.Mesh(healthBarGeometry, healthBarMaterial);
     healthBar.position.y = size * 0.8;
@@ -699,15 +1011,59 @@ function createEnemyShip(size = 1) {
         healthBar: healthBar,
         size: size,
         speed: 0.05 / size, // Larger enemies move slower
+        type: type, // Add enemy type
         moveParams: {
-            offset: Math.random() * Math.PI * 2,
-            amplitude: 0.2 + Math.random() * 0.3,
-            frequency: 0.5 + Math.random() * 0.5,
-            time: 0
-        }
+        offset: Math.random() * Math.PI * 2,
+        amplitude: 0.2 + Math.random() * 0.3,
+        frequency: 0.5 + Math.random() * 0.5,
+        time: 0
+        },
+        // Add sniper-specific properties
+        lastShotTime: 0,
+        shootingCooldown: 3000, // 3 seconds between shots
+        sniperBullets: [] // Array to store sniper bullets
     };
     
     return enemyGroup;
+}
+
+// Add sniper bullet creation function
+function createSniperBullet(position, direction) {
+    const bulletGroup = new THREE.Group();
+    
+    // Main bullet (red and larger than normal bullets)
+    const bulletGeometry = new THREE.CylinderGeometry(0.12, 0.12, 0.6, 12);
+    const bulletMaterial = new THREE.MeshPhongMaterial({ 
+        color: 0xff0000,
+        emissive: 0x800000,
+        emissiveIntensity: 0.8,
+        transparent: true,
+        opacity: 0.9
+    });
+    const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
+    bulletGroup.add(bullet);
+    
+    // Set up bullet group
+    bulletGroup.position.copy(position);
+    
+    // Calculate direction to player
+    const directionToPlayer = new THREE.Vector3()
+        .subVectors(player.position, position)
+        .normalize();
+    
+    // Set bullet rotation to face player
+    bulletGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), directionToPlayer);
+    
+    // Set up bullet properties
+    bulletGroup.userData = {
+        velocity: directionToPlayer.multiplyScalar(0.3), // Slower than normal bullets
+        damage: 30,
+        maxDistance: 20,
+        initialPosition: position.clone()
+    };
+    
+    scene.add(bulletGroup);
+    return bulletGroup;
 }
 
 // Add function to generate random enemy colors
@@ -771,11 +1127,14 @@ function createCubeSphere(radius, detail, color = 0x666666) {
     return group;
 }
 
+// Modify spawnEnemy function
 function spawnEnemy() {
-    const size = 0.5 + Math.pow(Math.random(), 2) * 2.5;
-    const enemy = createEnemyShip(size);
+    // 20% chance to spawn a sniper
+    const isSniper = Math.random() < 0.2;
+    const size = isSniper ? 1.5 : (0.5 + Math.pow(Math.random(), 2) * 2.5);
+    const enemy = createEnemyShip(size, isSniper ? 'sniper' : 'normal');
     
-    const spawnRadius = 20; // Reduced from 30 to match closer camera
+    const spawnRadius = 20;
     const angle = Math.random() * Math.PI * 2;
     
     enemy.position.x = player.position.x + Math.cos(angle) * spawnRadius;
@@ -1225,39 +1584,128 @@ function createBossCubeSphere(radius, detail, color = 0x800080) {
 function createBossEnemy() {
     const bossGroup = new THREE.Group();
     
-    // Main body (simple sphere)
-    const bodyGeometry = new THREE.SphereGeometry(3.0, 16, 16); // Reduced segments for performance
-    const bodyMaterial = new THREE.MeshPhongMaterial({
+    // Main body (hexagonal shape)
+    const mainBodyGeometry = new THREE.CylinderGeometry(2, 2, 1, 6);
+    const mainBodyMaterial = new THREE.MeshPhongMaterial({
         color: 0x800080,
         specular: 0x440044,
         shininess: 30,
         flatShading: true
     });
-    const mainBody = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    const mainBody = new THREE.Mesh(mainBodyGeometry, mainBodyMaterial);
     bossGroup.add(mainBody);
     
-    // Static ring of cubes
-    const ringRadius = 4.5;
-    const cubeCount = 16;
-    const cubeSize = 0.8;
+    // Central core (glowing sphere)
+    const coreGeometry = new THREE.SphereGeometry(0.8, 16, 16);
+    const coreMaterial = new THREE.MeshPhongMaterial({
+        color: 0xff00ff,
+        emissive: 0x800080,
+        emissiveIntensity: 0.5,
+        specular: 0x440044,
+        shininess: 100
+    });
+    const core = new THREE.Mesh(coreGeometry, coreMaterial);
+    bossGroup.add(core);
     
-    for (let i = 0; i < cubeCount; i++) {
-        const angle = (i / cubeCount) * Math.PI * 2;
-        const geometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
-        const material = new THREE.MeshPhongMaterial({
+    // Energy rings (rotating rings around the core)
+    for (let i = 0; i < 3; i++) {
+        const ringGeometry = new THREE.TorusGeometry(1.2 + i * 0.3, 0.1, 16, 32);
+        const ringMaterial = new THREE.MeshPhongMaterial({
             color: 0xff00ff,
-            specular: 0x440044,
-            shininess: 30,
-            flatShading: true
+            emissive: 0x800080,
+        emissiveIntensity: 0.3,
+            transparent: true,
+            opacity: 0.8
         });
+        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+        ring.rotation.x = Math.PI / 2;
+        ring.userData = {
+            rotationSpeed: 0.02 * (i + 1),
+            rotationAxis: new THREE.Vector3(0, 1, 0)
+        };
+        bossGroup.add(ring);
+    }
+    
+    // Weapon pods (6 around the main body)
+    for (let i = 0; i < 6; i++) {
+        const angle = (i / 6) * Math.PI * 2;
+        const podGroup = new THREE.Group();
         
-        const cube = new THREE.Mesh(geometry, material);
-        cube.position.set(
-            Math.cos(angle) * ringRadius,
+        // Pod body
+        const podGeometry = new THREE.BoxGeometry(0.8, 0.4, 1.2);
+        const podMaterial = new THREE.MeshPhongMaterial({
+            color: 0x800080,
+            specular: 0x440044,
+            shininess: 30
+        });
+        const pod = new THREE.Mesh(podGeometry, podMaterial);
+        pod.position.set(
+            Math.cos(angle) * 3,
             0,
-            Math.sin(angle) * ringRadius
+            Math.sin(angle) * 3
         );
-        bossGroup.add(cube);
+        pod.rotation.y = angle;
+        podGroup.add(pod);
+        
+        // Weapon barrel
+        const barrelGeometry = new THREE.CylinderGeometry(0.1, 0.1, 1.5, 8);
+        const barrelMaterial = new THREE.MeshPhongMaterial({
+            color: 0xff00ff,
+            emissive: 0x800080,
+            emissiveIntensity: 0.3
+        });
+        const barrel = new THREE.Mesh(barrelGeometry, barrelMaterial);
+        barrel.rotation.x = Math.PI / 2;
+        barrel.position.set(
+            Math.cos(angle) * 3.8,
+            0,
+            Math.sin(angle) * 3.8
+        );
+        podGroup.add(barrel);
+        
+        // Energy glow at barrel tip
+        const glowGeometry = new THREE.SphereGeometry(0.2, 8, 8);
+        const glowMaterial = new THREE.MeshBasicMaterial({
+            color: 0xff00ff,
+            transparent: true,
+            opacity: 0.8
+        });
+        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+        glow.position.set(
+            Math.cos(angle) * 4.5,
+            0,
+            Math.sin(angle) * 4.5
+        );
+        podGroup.add(glow);
+        
+        bossGroup.add(podGroup);
+    }
+    
+    // Shield panels (floating around the main body)
+    for (let i = 0; i < 4; i++) {
+        const angle = (i / 4) * Math.PI * 2;
+        const shieldGeometry = new THREE.PlaneGeometry(1.5, 2);
+        const shieldMaterial = new THREE.MeshPhongMaterial({
+            color: 0x800080,
+            specular: 0x440044,
+            shininess: 50,
+            transparent: true,
+            opacity: 0.7,
+            side: THREE.DoubleSide
+        });
+        const shield = new THREE.Mesh(shieldGeometry, shieldMaterial);
+        shield.position.set(
+            Math.cos(angle) * 2.5,
+            0,
+            Math.sin(angle) * 2.5
+        );
+        shield.rotation.y = angle;
+        shield.userData = {
+            rotationSpeed: 0.01,
+            floatSpeed: 0.02,
+            floatOffset: Math.random() * Math.PI * 2
+        };
+        bossGroup.add(shield);
     }
     
     // Health bar
@@ -1274,7 +1722,7 @@ function createBossEnemy() {
     healthBar.userData.initialScale = healthBar.scale.x;
     bossGroup.add(healthBar);
     bossGroup.userData.healthBar = healthBar;
-    
+
     // Boss properties
     bossGroup.userData.health = 500;
     bossGroup.userData.maxHealth = 500;
@@ -1305,19 +1753,118 @@ function createHUD() {
     killsCounter.id = 'killsCounter';
     killsCounter.textContent = 'Kills: 0';
     hudContainer.appendChild(killsCounter);
+
+    const timeCounter = document.createElement('div');
+    timeCounter.id = 'timeCounter';
+    timeCounter.textContent = 'Time: 0:00';
+    hudContainer.appendChild(timeCounter);
+
+    const weaponCounter = document.createElement('div');
+    weaponCounter.id = 'weaponCounter';
+    weaponCounter.textContent = 'Weapon: Normal';
+    hudContainer.appendChild(weaponCounter);
     
     document.body.appendChild(hudContainer);
+
+    // Create top left HUD for health and stamina
+    const topLeftHUD = document.createElement('div');
+    topLeftHUD.style.position = 'fixed';
+    topLeftHUD.style.top = '20px';
+    topLeftHUD.style.left = '20px';
+    topLeftHUD.style.color = 'white';
+    topLeftHUD.style.fontFamily = 'Arial, sans-serif';
+    topLeftHUD.style.fontSize = '24px';
+    topLeftHUD.style.textShadow = '2px 2px 4px rgba(0, 0, 0, 0.5)';
+    topLeftHUD.id = 'topLeftHUD';
+
+    // Health display with bar
+    const healthContainer = document.createElement('div');
+    healthContainer.style.display = 'flex';
+    healthContainer.style.alignItems = 'center';
+    healthContainer.style.gap = '10px';
+    healthContainer.style.marginBottom = '5px';
+
+    const healthDisplay = document.createElement('div');
+    healthDisplay.id = 'healthDisplay';
+    healthDisplay.style.color = '#00ff00';
+    healthDisplay.textContent = 'Health: 100';
+    healthContainer.appendChild(healthDisplay);
+
+    const healthBarContainer = document.createElement('div');
+    healthBarContainer.style.width = '100px';
+    healthBarContainer.style.height = '10px';
+    healthBarContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+    healthBarContainer.style.border = '2px solid #00ff00';
+    healthBarContainer.style.borderRadius = '5px';
+    healthBarContainer.style.overflow = 'hidden';
+
+    const healthBar = document.createElement('div');
+    healthBar.id = 'healthBar';
+    healthBar.style.width = '100%';
+    healthBar.style.height = '100%';
+    healthBar.style.backgroundColor = '#00ff00';
+    healthBar.style.transition = 'width 0.3s ease';
+    healthBarContainer.appendChild(healthBar);
+
+    healthContainer.appendChild(healthBarContainer);
+    topLeftHUD.appendChild(healthContainer);
+
+    // Stamina display with bar
+    const staminaContainer = document.createElement('div');
+    staminaContainer.style.display = 'flex';
+    staminaContainer.style.alignItems = 'center';
+    staminaContainer.style.gap = '10px';
+
+    const staminaDisplay = document.createElement('div');
+    staminaDisplay.id = 'staminaDisplay';
+    staminaDisplay.style.color = '#E8B71C';
+    staminaDisplay.textContent = 'Stamina: 100';
+    staminaContainer.appendChild(staminaDisplay);
+
+    const staminaBarContainer = document.createElement('div');
+    staminaBarContainer.style.width = '100px';
+    staminaBarContainer.style.height = '10px';
+    staminaBarContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+    staminaBarContainer.style.border = '2px solid #E8B71C';
+    staminaBarContainer.style.borderRadius = '5px';
+    staminaBarContainer.style.overflow = 'hidden';
+
+    const staminaBar = document.createElement('div');
+    staminaBar.id = 'staminaBar';
+    staminaBar.style.width = '100%';
+    staminaBar.style.height = '100%';
+    staminaBar.style.backgroundColor = '#E8B71C';
+    staminaBar.style.transition = 'width 0.3s ease';
+    staminaBarContainer.appendChild(staminaBar);
+
+    staminaContainer.appendChild(staminaBarContainer);
+    topLeftHUD.appendChild(staminaContainer);
+
+    document.body.appendChild(topLeftHUD);
 }
 
-// Add updateHUD function
+// Update the updateHUD function to include bar updates
 function updateHUD() {
     let scoreCounter = document.getElementById('scoreCounter');
     let killsCounter = document.getElementById('killsCounter');
+    let timeCounter = document.getElementById('timeCounter');
+    let weaponCounter = document.getElementById('weaponCounter');
+    let healthDisplay = document.getElementById('healthDisplay');
+    let staminaDisplay = document.getElementById('staminaDisplay');
+    let healthBar = document.getElementById('healthBar');
+    let staminaBar = document.getElementById('staminaBar');
     
-    if (!scoreCounter || !killsCounter) {
+    if (!scoreCounter || !killsCounter || !timeCounter || !weaponCounter || 
+        !healthDisplay || !staminaDisplay || !healthBar || !staminaBar) {
         createHUD();
         scoreCounter = document.getElementById('scoreCounter');
         killsCounter = document.getElementById('killsCounter');
+        timeCounter = document.getElementById('timeCounter');
+        weaponCounter = document.getElementById('weaponCounter');
+        healthDisplay = document.getElementById('healthDisplay');
+        staminaDisplay = document.getElementById('staminaDisplay');
+        healthBar = document.getElementById('healthBar');
+        staminaBar = document.getElementById('staminaBar');
     }
     
     if (scoreCounter) {
@@ -1326,6 +1873,32 @@ function updateHUD() {
     if (killsCounter) {
         killsCounter.textContent = `Kills: ${gameStats.kills}`;
     }
+    if (timeCounter) {
+        const minutes = Math.floor(gameState.elapsedTime / 60);
+        const seconds = Math.floor(gameState.elapsedTime % 60);
+        timeCounter.textContent = `Time: ${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
+    if (weaponCounter) {
+        if (gameState.currentWeapon === 'power') {
+            weaponCounter.textContent = `Power Weapon: ${gameState.powerWeaponAmmo}`;
+            weaponCounter.style.color = '#00ffff';
+        } else {
+            weaponCounter.textContent = 'Weapon: Normal';
+            weaponCounter.style.color = '#ffffff';
+        }
+    }
+    if (healthDisplay) {
+        healthDisplay.textContent = `Health: ${Math.round(gameState.playerHealth)}`;
+    }
+    if (staminaDisplay) {
+        staminaDisplay.textContent = `Stamina: ${Math.round(gameState.playerStamina)}`;
+    }
+    if (healthBar) {
+        healthBar.style.width = `${Math.max(0, gameState.playerHealth)}%`;
+    }
+    if (staminaBar) {
+        staminaBar.style.width = `${Math.max(0, gameState.playerStamina)}%`;
+    }
 }
 
 createHUD();
@@ -1333,13 +1906,21 @@ createHUD();
 function animate() {
     requestAnimationFrame(animate);
 
-    if (gameState.isGameOver) return;
+    // Only update game logic if the game has started and isn't over
+    if (gameState.isGameStarted && !gameState.isGameOver) {
+        // Update elapsed time every second
+        const timeNow = Date.now();
+        if (timeNow - gameState.lastTimeUpdate >= 1000) {
+            gameState.elapsedTime = Math.floor((timeNow - gameState.startTime) / 1000);
+            gameState.lastTimeUpdate = timeNow;
+            updateHUD();
+        }
+        
+        // Update space background time uniform
+        ground.material.uniforms.time.value += 0.001;
 
-    // Update space background time uniform
-    ground.material.uniforms.time.value += 0.001;
-
-    const deltaTime = 0.016; // Assuming 60fps
-    updatePlanets(deltaTime);
+        const deltaTime = 0.016; // Assuming 60fps
+        updatePlanets(deltaTime);
 
     // Player movement (slower speed)
     const moveSpeed = 0.1;
@@ -1350,10 +1931,10 @@ function animate() {
     if (keys.a) newPosition.x -= moveSpeed;
     if (keys.d) newPosition.x += moveSpeed;
 
-    // Check for planet collisions before applying movement
+        // Check for planet collisions before applying movement
     let canMove = true;
-    for (const planet of planets) {
-        if (newPosition.distanceTo(planet.position) < planet.userData.collisionRadius + 0.5) {
+        for (const planet of planets) {
+            if (newPosition.distanceTo(planet.position) < planet.userData.collisionRadius + 0.5) {
             canMove = false;
             break;
         }
@@ -1364,34 +1945,34 @@ function animate() {
         player.position.copy(newPosition);
     }
 
-    // Update player trails
-    const currentTime = Date.now();
-    if (currentTime - playerTrails.lastSpawnTime >= playerTrails.spawnInterval) {
-        // Spawn new particles
-        for (let i = 0; i < playerTrails.particleCount; i++) {
-            const offset = new THREE.Vector3(
-                (Math.random() - 0.5) * 0.5,
-                0,
-                (Math.random() - 0.5) * 0.5
-            );
-            createTrailParticle(player.position.clone().add(offset));
+        // Update player trails
+        const currentTime = Date.now();
+        if (currentTime - playerTrails.lastSpawnTime >= playerTrails.spawnInterval) {
+            // Spawn new particles
+            for (let i = 0; i < playerTrails.particleCount; i++) {
+                const offset = new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.5,
+                    0,
+                    (Math.random() - 0.5) * 0.5
+                );
+                createTrailParticle(player.position.clone().add(offset));
+            }
+            playerTrails.lastSpawnTime = currentTime;
         }
-        playerTrails.lastSpawnTime = currentTime;
-    }
 
-    // Update existing trail particles
-    for (let i = playerTrails.particles.length - 1; i >= 0; i--) {
-        const particle = playerTrails.particles[i];
-        particle.userData.age += 16; // Assuming 60fps
+        // Update existing trail particles
+        for (let i = playerTrails.particles.length - 1; i >= 0; i--) {
+            const particle = playerTrails.particles[i];
+            particle.userData.age += 16; // Assuming 60fps
 
-        if (particle.userData.age >= particle.userData.lifetime) {
-            scene.remove(particle);
-            playerTrails.particles.splice(i, 1);
-        } else {
-            const lifePercent = 1 - (particle.userData.age / particle.userData.lifetime);
-            particle.material.opacity = lifePercent * 0.6;
-            particle.scale.setScalar(lifePercent * particle.userData.initialScale);
-        }
+            if (particle.userData.age >= particle.userData.lifetime) {
+                scene.remove(particle);
+                playerTrails.particles.splice(i, 1);
+            } else {
+                const lifePercent = 1 - (particle.userData.age / particle.userData.lifetime);
+                particle.material.opacity = lifePercent * 0.6;
+                particle.scale.setScalar(lifePercent * particle.userData.initialScale);
+            }
     }
 
     // Update camera to follow player
@@ -1416,27 +1997,27 @@ function animate() {
     }
 
     // Automatic shooting
-    if (shootingMode.useMouse) {
-        if (gameState.isShooting) {
-            shoot(gameState.mousePosition);
-        }
-    } else {
-        // For arrow key shooting, check if any arrow keys are pressed
-        if (keys.ArrowUp || keys.ArrowDown || keys.ArrowLeft || keys.ArrowRight) {
-            shoot();
-        }
+        if (shootingMode.useMouse) {
+    if (gameState.isShooting) {
+        shoot(gameState.mousePosition);
+            }
+        } else {
+            // For arrow key shooting, check if any arrow keys are pressed
+            if (keys.ArrowUp || keys.ArrowDown || keys.ArrowLeft || keys.ArrowRight) {
+                shoot();
+            }
     }
 
     // Update stamina
-    if (!gameState.isShooting && !(keys.ArrowUp || keys.ArrowDown || keys.ArrowLeft || keys.ArrowRight)) {
-        gameState.playerStamina = Math.min(100, gameState.playerStamina + gameState.staminaRechargeRate * 0.016);
+        if (!gameState.isShooting && !(keys.ArrowUp || keys.ArrowDown || keys.ArrowLeft || keys.ArrowRight)) {
+            gameState.playerStamina = Math.min(100, gameState.playerStamina + gameState.staminaRechargeRate * 0.016);
     }
     
     // Update stamina bar
     player.userData.staminaBar.scale.x = (gameState.playerStamina / 100) * player.userData.staminaBar.userData.initialScale;
 
-    // Update stamina warning
-    updateStaminaWarning();
+        // Update stamina warning
+        updateStaminaWarning();
 
     // Update health bars to always face camera
     player.userData.healthBar.quaternion.copy(camera.quaternion);
@@ -1459,8 +2040,15 @@ function animate() {
         const bullet = bullets[i];
         bullet.position.add(bullet.userData.velocity);
 
-        // Remove bullets that exceed fixed distance
-        if (bullet.position.distanceTo(bullet.userData.initialPosition) > bullet.userData.maxDistance) {
+            // Update trail opacity
+            if (bullet.userData.trailSegments) {
+                bullet.userData.trailSegments.forEach((trail, index) => {
+                    trail.material.opacity = Math.max(0, 0.5 - (index * 0.15));
+                });
+            }
+
+            // Remove bullets that exceed fixed distance
+            if (bullet.position.distanceTo(bullet.userData.initialPosition) > bullet.userData.maxDistance) {
             scene.remove(bullet);
             bullets.splice(i, 1);
             continue;
@@ -1469,20 +2057,20 @@ function animate() {
         // Check for enemy collisions
         for (let j = enemies.length - 1; j >= 0; j--) {
             const enemy = enemies[j];
-            if (bullet.position.distanceTo(enemy.position) < 1) {
+            if (bullet.position.distanceTo(enemy.position) < 1.5) { // Increased from 1.0 to 1.5
                 // Get enemy color from its first mesh component
-                const enemyColor = enemy.children[0].children[0].material.color.getHex();
+                const enemyColor = enemy.userData.type === 'sniper' ? 0xff0000 : enemy.children[0].children[0].material.color.getHex();
                 // Create impact effect with enemy color
                 const impact = createProjectileImpact(bullet.position.clone(), enemyColor);
                 explosions.push(impact);
                 
-                // Deal damage to enemy
-                enemy.userData.health -= 20;
-                
+                // Deal damage to enemy based on weapon type
+                enemy.userData.health -= bullet.userData.damage;
+
                 // Update enemy health bar
                 const healthPercent = enemy.userData.health / enemy.userData.maxHealth;
                 enemy.userData.healthBar.scale.x = Math.max(0, healthPercent) * enemy.userData.healthBar.userData.initialScale;
-                
+
                 // Remove bullet
                 scene.remove(bullet);
                 bullets.splice(i, 1);
@@ -1504,14 +2092,14 @@ function animate() {
 
         // Check for boss collision
         if (bossState.boss && bullet.position.distanceTo(bossState.boss.position) < 3) {
-            // Get boss color
-            const bossColor = bossState.boss.children[0].material.color.getHex();
-            // Create impact effect with boss color
-            const impact = createProjectileImpact(bullet.position.clone(), bossColor);
-            explosions.push(impact);
-            
-            // Deal damage to boss
-            bossState.boss.userData.health -= 10;
+                // Get boss color
+                const bossColor = bossState.boss.children[0].material.color.getHex();
+                // Create impact effect with boss color
+                const impact = createProjectileImpact(bullet.position.clone(), bossColor);
+                explosions.push(impact);
+                
+                // Deal damage to boss based on weapon type
+                bossState.boss.userData.health -= bullet.userData.damage;
             scene.remove(bullet);
             bullets.splice(i, 1);
 
@@ -1520,26 +2108,59 @@ function animate() {
             bossState.boss.userData.healthBar.scale.x = Math.max(0, healthPercent) * bossState.boss.userData.healthBar.userData.initialScale;
 
             if (bossState.boss.userData.health <= 0) {
-                // Create explosion effect
-                explosions.push(createExplosion(bossState.boss.position.clone()));
-                
-                // Update stats
-                gameStats.score += bossState.boss.userData.maxHealth; // Add boss's max health to score
-                
-                // Remove current boss
+                    // Create explosion effect
+                    explosions.push(createExplosion(bossState.boss.position.clone()));
+                    
+                    // Spawn 5 random enemies at boss death location in a ring formation
+                    const numEnemies = 5;
+                    const spawnRadius = 3; // Increased from 2 to 3 for better spacing
+                    const bossDeathPos = bossState.boss.position.clone();
+                    
+                    for (let i = 0; i < numEnemies; i++) {
+                        const size = 0.5 + Math.pow(Math.random(), 2) * 2.5;
+                        const enemy = createEnemyShip(size);
+                        
+                        // Calculate position in a perfect circle
+                        const angle = (i / numEnemies) * Math.PI * 2;
+                        const offsetX = Math.cos(angle) * spawnRadius;
+                        const offsetZ = Math.sin(angle) * spawnRadius;
+                        
+                        // Position enemy with offset from boss death location
+                        enemy.position.set(
+                            bossDeathPos.x + offsetX,
+                            0.5,
+                            bossDeathPos.z + offsetZ
+                        );
+                        
+                        // Make enemy face outward from the center
+                        const outwardDirection = new THREE.Vector3(offsetX, 0, offsetZ).normalize();
+                        enemy.lookAt(new THREE.Vector3(
+                            enemy.position.x + outwardDirection.x,
+                            enemy.position.y,
+                            enemy.position.z + outwardDirection.z
+                        ));
+                        
+                        scene.add(enemy);
+                        enemies.push(enemy);
+                    }
+                    
+                    // Update stats
+                    gameStats.score += bossState.boss.userData.maxHealth;
+                    
+                    // Remove current boss
                 scene.remove(bossState.boss);
                 bossState.boss = null;
-                bossState.isSpawned = false;
-                bossState.lastBossDefeatTime = Date.now();
+                    bossState.isSpawned = false;
+                    bossState.lastBossDefeatTime = Date.now();
             }
             break;
         }
 
-        // Check for planet collisions
-        for (const planet of planets) {
-            if (bullet.position.distanceTo(planet.position) < planet.userData.collisionRadius) {
-                const planetColor = planet.children[0].material.color.getHex();
-                const impact = createProjectileImpact(bullet.position.clone(), planetColor);
+            // Check for planet collisions
+            for (const planet of planets) {
+                if (bullet.position.distanceTo(planet.position) < planet.userData.collisionRadius) {
+                    const planetColor = planet.children[0].material.color.getHex();
+                    const impact = createProjectileImpact(bullet.position.clone(), planetColor);
                 explosions.push(impact);
                 scene.remove(bullet);
                 bullets.splice(i, 1);
@@ -1549,7 +2170,7 @@ function animate() {
     }
 
     // Update enemies (clean up enemies that are too far from player)
-    const maxEnemyDistance = 200;
+        const maxEnemyDistance = 200;
     const enemySpeed = 0.05;
     const enemyRadius = 1.0;
 
@@ -1607,13 +2228,80 @@ function animate() {
         const targetRotation = Math.atan2(finalDirection.x, finalDirection.z);
         enemy.rotation.y = targetRotation;
 
+        // Sniper-specific behavior
+        if (enemy.userData.type === 'sniper') {
+            const currentTime = Date.now();
+            if (currentTime - enemy.userData.lastShotTime >= enemy.userData.shootingCooldown) {
+                // Create sniper bullet
+                const sniperBullet = createSniperBullet(enemy.position.clone(), direction);
+                enemy.userData.sniperBullets.push(sniperBullet);
+                enemy.userData.lastShotTime = currentTime;
+            }
+
+            // Update sniper bullets
+            for (let j = enemy.userData.sniperBullets.length - 1; j >= 0; j--) {
+                const bullet = enemy.userData.sniperBullets[j];
+                
+                // Move bullet
+                bullet.position.add(bullet.userData.velocity);
+                
+                // Check for player collision
+                if (bullet.position.distanceTo(player.position) < 1) {
+                    // Create neon red impact effect
+                    const impact = createProjectileImpact(bullet.position.clone(), 0xff0000);
+                    explosions.push(impact);
+                    
+                    // Deal damage to player
+                    gameState.playerHealth -= bullet.userData.damage;
+                    
+                    // Update player health bar
+                    const healthPercent = gameState.playerHealth / 100;
+                    player.userData.healthBar.scale.x = Math.max(0, healthPercent) * player.userData.healthBar.userData.initialScale;
+                    
+                    // Remove bullet
+                    scene.remove(bullet);
+                    enemy.userData.sniperBullets.splice(j, 1);
+                    
+                    // Check for game over
+                    if (gameState.playerHealth <= 0 && !gameState.isGameOver) {
+                        gameState.isGameOver = true;
+                        showGameOverScreen();
+                    }
+                    continue;
+                }
+                
+                // Remove bullets that are too far
+                if (bullet.position.distanceTo(bullet.userData.initialPosition) > bullet.userData.maxDistance) {
+                    scene.remove(bullet);
+                    enemy.userData.sniperBullets.splice(j, 1);
+                }
+            }
+        }
+
         // Check collision with player
         if (enemy.position.distanceTo(player.position) < 1) {
-            gameState.playerHealth -= 0.5;
+            // Get enemy's remaining health and apply it as damage
+            const damageAmount = enemy.userData.health;
+            gameState.playerHealth -= damageAmount;
             
             // Update player health bar
             const healthPercent = gameState.playerHealth / 100;
             player.userData.healthBar.scale.x = Math.max(0, healthPercent) * player.userData.healthBar.userData.initialScale;
+
+            // Create explosion effect for the enemy
+            explosions.push(createExplosion(enemy.position.clone()));
+            
+            // Remove the enemy and its bullets
+            if (enemy.userData.type === 'sniper') {
+                enemy.userData.sniperBullets.forEach(bullet => scene.remove(bullet));
+            }
+            scene.remove(enemy);
+            enemies.splice(i, 1);
+            
+            // Update stats
+            gameStats.kills++;
+            gameStats.score += enemy.userData.maxHealth;
+            updateHUD();
 
             if (gameState.playerHealth <= 0 && !gameState.isGameOver) {
                 gameState.isGameOver = true;
@@ -1705,7 +2393,7 @@ function animate() {
     }
 
     // Update hazards
-    // spawnRandomHazard(); // Temporarily disabled
+        // spawnRandomHazard(); // Temporarily disabled
 
     // Update light beams
     for (let i = hazards.lightBeams.length - 1; i >= 0; i--) {
@@ -1858,12 +2546,12 @@ function animate() {
 
     // Boss spawn check (simplified for testing)
     if (!bossState.isSpawned) {
-        const currentTime = Date.now();
-        if (!bossState.lastBossDefeatTime || currentTime - bossState.lastBossDefeatTime >= bossState.respawnDelay) {
-            bossState.boss = createBossEnemy();
-            scene.add(bossState.boss);
-            bossState.isSpawned = true;
-        }
+            const currentTime = Date.now();
+            if (!bossState.lastBossDefeatTime || currentTime - bossState.lastBossDefeatTime >= bossState.respawnDelay) {
+        bossState.boss = createBossEnemy();
+        scene.add(bossState.boss);
+        bossState.isSpawned = true;
+            }
     }
 
     // Boss update logic
@@ -1876,7 +2564,7 @@ function animate() {
             player.position.x - boss.position.x
         );
         const distanceToPlayer = boss.position.distanceTo(player.position);
-        const targetDistance = 20;
+            const targetDistance = 20;
         
         // Calculate movement
         const moveSpeed = boss.userData.moveSpeed;
@@ -1924,11 +2612,11 @@ function animate() {
                 enemies.splice(j, 1);
                 scene.remove(projectile);
                 bossState.projectiles.splice(i, 1);
-                
-                // Update stats
-                gameStats.kills++;
-                gameStats.score += enemy.userData.maxHealth; // Add enemy's max health to score
-                updateHUD();
+                    
+                    // Update stats
+                    gameStats.kills++;
+                    gameStats.score += enemy.userData.maxHealth; // Add enemy's max health to score
+                    updateHUD();
                 break;
             }
         }
@@ -1981,9 +2669,9 @@ function animate() {
                 continue;
             }
             
-            // Check for planet collisions
-            for (const planet of planets) {
-                if (projectile.position.distanceTo(planet.position) < planet.userData.collisionRadius) {
+                // Check for planet collisions
+                for (const planet of planets) {
+                    if (projectile.position.distanceTo(planet.position) < planet.userData.collisionRadius) {
                     const impact = createProjectileImpact(projectile.position.clone());
                     explosions.push(impact);
                     scene.remove(projectile);
@@ -2000,6 +2688,104 @@ function animate() {
         }
     }
 
+        // Update health pickups
+        spawnHealthPickup();
+        
+        // Update existing health pickups
+        for (let i = pickups.health.length - 1; i >= 0; i--) {
+            const pickup = pickups.health[i];
+            
+            // Rotate and bob the pickup
+            pickup.rotation.y += pickup.userData.rotationSpeed;
+            const bobOffset = Math.sin(Date.now() * 0.003 * pickup.userData.bobSpeed) * pickup.userData.bobHeight;
+            pickup.position.y = pickup.userData.initialY + bobOffset;
+            
+            // Check for player collision
+            if (pickup.position.distanceTo(player.position) < 3.0) { // Increased from 1.5 to 3.0
+                // Heal player
+                gameState.playerHealth = Math.min(100, gameState.playerHealth + pickup.userData.healAmount);
+                
+                // Update health bar
+                const healthPercent = gameState.playerHealth / 100;
+                player.userData.healthBar.scale.x = healthPercent * player.userData.healthBar.userData.initialScale;
+                
+                // Remove pickup
+                scene.remove(pickup);
+                pickups.health.splice(i, 1);
+                
+                // Create a larger flash effect to match the increased pickup radius
+                const flashGeometry = new THREE.CircleGeometry(3.0, 16); // Increased from 1.5 to 3.0
+                const flashMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x00ff00,
+                    transparent: true,
+                    opacity: 0.5,
+                    side: THREE.DoubleSide
+                });
+                const flash = new THREE.Mesh(flashGeometry, flashMaterial);
+                flash.position.copy(pickup.position);
+                flash.rotation.x = -Math.PI / 2;
+                flash.userData = { age: 0, lifetime: 0.3 };
+                scene.add(flash);
+                explosions.push(flash);
+            }
+            
+            // Remove pickups that are too far from player
+            if (pickup.position.distanceTo(player.position) > 100) {
+                scene.remove(pickup);
+                pickups.health.splice(i, 1);
+            }
+        }
+
+        // Update weapon pickups
+        spawnWeaponPickup();
+        
+        // Update existing weapon pickups
+        for (let i = pickups.weapon.length - 1; i >= 0; i--) {
+            const pickup = pickups.weapon[i];
+            
+            // Rotate and bob the pickup
+            pickup.rotation.y += pickup.userData.rotationSpeed;
+            const bobOffset = Math.sin(Date.now() * 0.003 * pickup.userData.bobSpeed) * pickup.userData.bobHeight;
+            pickup.position.y = pickup.userData.initialY + bobOffset;
+            
+            // Check for player collision
+            if (pickup.position.distanceTo(player.position) < 3.0) {
+                // Give player power weapon
+                gameState.currentWeapon = 'power';
+                gameState.powerWeaponAmmo = pickup.userData.ammoAmount;
+                
+                // Update HUD
+                updateHUD();
+                
+                // Remove pickup
+                scene.remove(pickup);
+                pickups.weapon.splice(i, 1);
+                
+                // Create flash effect
+                const flashGeometry = new THREE.CircleGeometry(3.0, 16);
+                const flashMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x00ffff,
+                    transparent: true,
+                    opacity: 0.5,
+                    side: THREE.DoubleSide
+                });
+                const flash = new THREE.Mesh(flashGeometry, flashMaterial);
+                flash.position.copy(pickup.position);
+                flash.rotation.x = -Math.PI / 2;
+                flash.userData = { age: 0, lifetime: 0.3 };
+                scene.add(flash);
+                explosions.push(flash);
+            }
+            
+            // Remove pickups that are too far from player
+            if (pickup.position.distanceTo(player.position) > 100) {
+                scene.remove(pickup);
+                pickups.weapon.splice(i, 1);
+            }
+        }
+    }
+    
+    // Always render the scene
     renderer.render(scene, camera);
 }
 
@@ -2101,4 +2887,184 @@ function updateCamera() {
     camera.position.x = player.position.x;
     camera.position.z = player.position.z;
     camera.lookAt(player.position);
-} 
+}
+
+// Add start screen creation function
+function createStartScreen() {
+    const startScreen = document.createElement('div');
+    startScreen.id = 'startScreen';
+    startScreen.style.position = 'fixed';
+    startScreen.style.top = '0';
+    startScreen.style.left = '0';
+    startScreen.style.width = '100%';
+    startScreen.style.height = '100%';
+    startScreen.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+    startScreen.style.display = 'flex';
+    startScreen.style.flexDirection = 'column';
+    startScreen.style.justifyContent = 'center';
+    startScreen.style.alignItems = 'center';
+    startScreen.style.zIndex = '1000';
+    startScreen.style.color = '#ffffff';
+    startScreen.style.fontFamily = 'Arial, sans-serif';
+    
+    const title = document.createElement('h1');
+    title.textContent = '3D Top Down Shooter';
+    title.style.fontSize = '48px';
+    title.style.marginBottom = '20px';
+    title.style.color = '#ff0000';
+    title.style.textShadow = '2px 2px 4px rgba(0, 0, 0, 0.5)';
+    
+    // Create controls container
+    const controlsContainer = document.createElement('div');
+    controlsContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+    controlsContainer.style.padding = '30px';
+    controlsContainer.style.borderRadius = '15px';
+    controlsContainer.style.marginBottom = '30px';
+    controlsContainer.style.border = '2px solid #444';
+    
+    // Create controls title
+    const controlsTitle = document.createElement('h2');
+    controlsTitle.textContent = 'Controls';
+    controlsTitle.style.marginBottom = '20px';
+    controlsTitle.style.color = '#00ff00';
+    controlsTitle.style.textAlign = 'center';
+    controlsTitle.style.fontSize = '28px';
+    
+    // Create controls list
+    const controlsList = document.createElement('div');
+    controlsList.style.display = 'flex';
+    controlsList.style.flexDirection = 'column';
+    controlsList.style.gap = '15px';
+    
+    // Add control items
+    const controls = [
+        { key: 'WASD', action: 'Move' },
+        { key: 'Mouse', action: 'Aim' },
+        { key: 'Left Click', action: 'Shoot' }
+    ];
+    
+    controls.forEach(control => {
+        const controlItem = document.createElement('div');
+        controlItem.style.display = 'flex';
+        controlItem.style.alignItems = 'center';
+        controlItem.style.gap = '15px';
+        
+        const keyElement = document.createElement('span');
+        keyElement.textContent = control.key;
+        keyElement.style.backgroundColor = '#333';
+        keyElement.style.padding = '5px 10px';
+        keyElement.style.borderRadius = '5px';
+        keyElement.style.fontFamily = 'monospace';
+        keyElement.style.color = '#00ff00';
+        
+        const actionElement = document.createElement('span');
+        actionElement.textContent = control.action;
+        actionElement.style.color = '#fff';
+        
+        controlItem.appendChild(keyElement);
+        controlItem.appendChild(actionElement);
+        controlsList.appendChild(controlItem);
+    });
+    
+    controlsContainer.appendChild(controlsTitle);
+    controlsContainer.appendChild(controlsList);
+    
+    const startPrompt = document.createElement('div');
+    startPrompt.textContent = 'Click or Press Space to Start';
+    startPrompt.style.fontSize = '24px';
+    startPrompt.style.animation = 'pulse 1.5s infinite';
+    startPrompt.style.marginTop = '20px';
+    
+    // Add CSS animation
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+    `;
+    document.head.appendChild(style);
+    
+    startScreen.appendChild(title);
+    startScreen.appendChild(controlsContainer);
+    startScreen.appendChild(startPrompt);
+    document.body.appendChild(startScreen);
+    
+    // Add event listeners for starting the game
+    function startGame() {
+        gameState.isGameStarted = true;
+        gameState.startTime = Date.now(); // Add this line to set the start time
+        gameState.lastTimeUpdate = Date.now();
+        startScreen.style.display = 'none';
+        // Initialize player position and game state
+        resetGame();
+    }
+    
+    startScreen.addEventListener('click', startGame);
+    document.addEventListener('keydown', (event) => {
+        if (event.code === 'Space' && !gameState.isGameStarted) {
+            startGame();
+        }
+    });
+}
+
+// Add reset game function
+function resetGame() {
+    // Reset player position
+    player.position.set(0, 2, 0);
+    
+    // Reset game state
+    gameState.playerHealth = 100;
+    gameState.playerStamina = 100;
+    gameState.isGameOver = false;
+    
+    // Reset score
+    gameStats.score = 0;
+    gameStats.kills = 0;
+    
+    // Update HUD
+    updateHUD();
+    
+    // Clear existing enemies
+    while(enemies.length > 0) {
+        const enemy = enemies.pop();
+        scene.remove(enemy);
+    }
+    
+    // Clear boss if it exists
+    if (bossState.boss) {
+        scene.remove(bossState.boss);
+        bossState.boss = null;
+    }
+    
+    // Clear projectiles
+    while(bossState.projectiles.length > 0) {
+        const projectile = bossState.projectiles.pop();
+        scene.remove(projectile);
+    }
+
+    // Spawn a sniper enemy near the player for debugging
+    const sniper = createEnemyShip(1.5, 'sniper');
+    const spawnRadius = 10; // Spawn 10 units away from player
+    const angle = Math.random() * Math.PI * 2;
+    sniper.position.x = player.position.x + Math.cos(angle) * spawnRadius;
+    sniper.position.z = player.position.z + Math.sin(angle) * spawnRadius;
+    sniper.position.y = 0.5;
+    sniper.lookAt(player.position);
+    scene.add(sniper);
+    enemies.push(sniper);
+}
+
+// Call createStartScreen after scene setup
+// Find where you initialize the scene and add:
+createStartScreen();
+
+// After scene setup and before animation loop
+initScene();
+setupLighting();
+createGround();
+createPlayer();
+createHUD();
+createStartScreen(); // Add start screen
+animate(); 
