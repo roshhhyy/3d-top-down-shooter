@@ -1,40 +1,67 @@
-# 3D Top-Down Shooter Game
+# 3D Top-Down Shooter
 
-A browser-based 3D top-down shooter game built with Three.js. Features include:
+A 3D top-down shooter game built with Three.js. Fight off waves of enemies, collect power-ups, and survive as long as possible!
 
-- Player-controlled spaceship with health and stamina systems
-- Enemy AI with swaying movement patterns
-- Boss enemy with unique attack patterns
-- Environmental hazards (light beams and sword walls)
-- Destructible enemies and collision systems
-- Tree obstacles for tactical gameplay
-- Visual effects including explosions and projectile impacts
+## Live Demo
 
-## Setup
+Play the game here: [3D Top-Down Shooter](https://roshhhyy.github.io/3d-top-down-shooter/)
 
-1. Clone the repository
+## Features
+
+- 3D top-down perspective
+- Wave-based enemy spawning
+- Power weapon system
+- Health and stamina management
+- Score tracking
+- Boss battles
+- Visual effects and particle systems
+
+## Controls
+
+- WASD: Move player
+- Mouse: Aim and shoot
+- Space: Sprint
+- Click/Press Space: Start game
+
+## Local Development
+
+1. Clone the repository:
+```bash
+git clone https://github.com/roshhhyy/3d-top-down-shooter.git
+cd 3d-top-down-shooter
+```
+
 2. Install dependencies:
 ```bash
 npm install
 ```
-3. Run the development server:
+
+3. Start the development server:
 ```bash
 npm start
 ```
 
-## Controls
+4. Open your browser and navigate to `http://localhost:5173`
 
-- WASD: Move the ship
-- Mouse: Aim
-- Left Click (hold): Shoot
-- Avoid environmental hazards and enemy projectiles
-- Use trees as cover
+## Building for Production
+
+To build the project for production:
+
+```bash
+npm run build
+```
+
+The built files will be in the `dist` directory.
 
 ## Technologies Used
 
 - Three.js for 3D graphics
-- JavaScript (ES6+)
-- HTML5/CSS3
+- Vite for build tooling
+- JavaScript for game logic
+
+## License
+
+ISC
 
 ## Development
 
